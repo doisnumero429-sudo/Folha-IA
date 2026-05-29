@@ -31,8 +31,74 @@ const upload  = multer({
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/atestados
+// POST /api/atestados/lote — save pre-parsed certificates (no AI, no file)
 // ---------------------------------------------------------------------------
+router.post('/lote', auth, async (req, res) => {
+  try {
+    const { fechamento_id, atestados: lista } = req.body;
+    if (!fechamento_id) return res.status(400).json({ error: 'fechamento_id é obrigatório.' });
+    if (!Array.isArray(lista) || lista.length === 0) return res.status(400).json({ error: 'atestados deve ser um array não vazio.' });
+
+    const { data: fechamento } = await supabaseAdmin
+      .from('fechamentos').select('*').eq('id', fechamento_id).single();
+    if (!fechamento) return res.status(404).json({ error: 'Fechamento não encontrado.' });
+    if (fechamento.status === 'aprovado') return res.status(409).json({ error: 'Fechamento já aprovado.' });
+
+    const saved = [];
+    for (const item of lista) {
+      // Resolve employee: explicit id beats name match
+      let funcionario_id = item.funcionario_id ? parseInt(item.funcionario_id, 10) : null;
+      if (!funcionario_id && item.nome_paciente) {
+        const matchResult = matchName(item.nome_paciente);
+        if (matchResult.type === 'match') funcionario_id = matchResult.funcionario.id;
+      }
+
+      const { data: inserted, error: insErr } = await supabaseAdmin
+        .from('atestados')
+        .insert({
+          fechamento_id,
+          funcionario_id:  funcionario_id || null,
+          data_emissao:    item.data_emissao   || null,
+          periodo_inicio:  item.periodo_inicio  || null,
+          periodo_fim:     item.periodo_fim     || null,
+          dias_afastados:  item.total_dias_afastados || 0,
+          medico:          item.medico          || null,
+          crm:             item.crm             || null,
+          nome_extraido:   item.nome_paciente   || null,
+        })
+        .select()
+        .single();
+
+      if (insErr) { console.error('[atestados/lote] insert error:', insErr.message); continue; }
+
+      // Check conflicts
+      if (funcionario_id && item.periodo_inicio && item.periodo_fim) {
+        const { data: faltasDatas } = await supabaseAdmin
+          .from('faltas_datas').select('data')
+          .eq('fechamento_id', fechamento_id).eq('funcionario_id', funcionario_id);
+        const dates = (faltasDatas || []).map(f => f.data);
+        if (dates.length > 0) {
+          const conflicts = findConflicts(dates, [inserted]);
+          if (conflicts.length > 0) {
+            await supabaseAdmin.from('pendencias').insert({
+              fechamento_id, tipo: 'conflito_falta_atestado',
+              descricao: `Conflito: ${conflicts.length} falta(s) no período do atestado (${item.periodo_inicio} a ${item.periodo_fim}).`,
+              nome_original: item.nome_paciente || null,
+            });
+          }
+        }
+      }
+      saved.push(inserted);
+    }
+
+    return res.status(201).json({ saved, total: saved.length });
+  } catch (err) {
+    console.error('[atestados/lote]', err);
+    return res.status(500).json({ error: 'Erro ao salvar atestados.' });
+  }
+});
+
+
 router.post('/', auth, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {

@@ -65,10 +65,10 @@ export default function SettingsPage() {
     setAddingEmp(true)
     setEmpError(null)
     try {
-      const res = await api.post('/funcionarios', { nome: newNome.trim(), funcao: newFuncao })
-      setEmployees(prev => [...prev, res.data].sort((a, b) => a.nome.localeCompare(b.nome)))
+      await api.post('/funcionarios', { nome: newNome.trim(), funcao: newFuncao })
       setNewNome('')
       setNewFuncao('')
+      await loadEmployees()
     } catch (err) {
       setEmpError(err.response?.data?.error || 'Erro ao adicionar funcionário')
     } finally {
