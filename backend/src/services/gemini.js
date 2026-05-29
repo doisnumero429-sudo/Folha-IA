@@ -1,32 +1,25 @@
 'use strict';
 
 /**
- * Gemini AI service for medical certificate (atestado) OCR.
+ * AI cascade for medical certificate (atestado) OCR.
  *
- * Sends an image/PDF to Gemini and extracts structured JSON.
- * CID (disease code) is explicitly excluded from extraction.
+ * Providers tried in order:
+ *   1. Google Gemini  — gemini-2.5-flash → gemini-2.5-flash-lite (native PDF support)
+ *   2. xAI Grok       — grok-2-vision-1212 (OpenAI-compatible)
+ *   3. OpenRouter     — qwen/qwen2.5-vl-72b-instruct:free (OpenAI-compatible)
  *
- * Fallback chain: gemini-2.5-flash → gemini-2.5-flash-lite-preview-06-17
+ * Each provider is skipped if its API key is not configured.
+ * Falls through on rate-limit, quota, or any error.
+ *
+ * CID (disease code) is never extracted or stored.
  */
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-
-let _genAI = null;
-
-function getClient() {
-  if (!_genAI) {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error('GEMINI_API_KEY não configurada.');
-    }
-    _genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  }
-  return _genAI;
-}
+const OpenAI = require('openai');
 
 // ---------------------------------------------------------------------------
-// Prompt
+// Shared prompt
 // ---------------------------------------------------------------------------
-
 const EXTRACTION_PROMPT = `Analise este atestado médico e extraia as seguintes informações em JSON.
 
 REGRAS IMPORTANTES:
@@ -49,79 +42,175 @@ Responda APENAS com JSON válido, sem markdown, sem texto extra, sem bloco de c�
 }`;
 
 // ---------------------------------------------------------------------------
-// Core extraction
+// Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Extract medical certificate data from a file buffer.
- *
- * @param {Buffer} fileBuffer
- * @param {string} mimeType  - e.g. 'image/jpeg', 'image/png', 'application/pdf'
- * @returns {Promise<{
- *   nome_paciente: string|null,
- *   data_emissao: string|null,
- *   periodo_inicio: string|null,
- *   periodo_fim: string|null,
- *   total_dias_afastados: number|null,
- *   medico: string|null,
- *   crm: string|null
- * }>}
- */
-async function extractCertificate(fileBuffer, mimeType) {
-  const client = getClient();
+function normalizeResult(parsed) {
+  if (parsed.total_dias_afastados !== null && parsed.total_dias_afastados !== undefined) {
+    parsed.total_dias_afastados = parseInt(parsed.total_dias_afastados, 10) || 0;
+  } else {
+    parsed.total_dias_afastados = null;
+  }
+  return parsed;
+}
 
-  async function tryModel(modelName) {
+function parseJSON(rawText) {
+  const jsonText = rawText
+    .replace(/^```json?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  return JSON.parse(jsonText);
+}
+
+function isRateLimit(err) {
+  if (!err) return false;
+  const msg = (err.message || '').toLowerCase();
+  const status = err.status || err.statusCode || (err.response && err.response.status);
+  return (
+    status === 429 ||
+    msg.includes('quota') ||
+    msg.includes('rate') ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('overloaded') ||
+    msg.includes('unavailable') ||
+    msg.includes('too many requests')
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Provider 1: Google Gemini
+// ---------------------------------------------------------------------------
+async function tryGemini(fileBuffer, mimeType) {
+  if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY não configurada — skip');
+
+  const client = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const base64 = fileBuffer.toString('base64');
+
+  async function callModel(modelName) {
     const model = client.getGenerativeModel({ model: modelName });
-    const base64 = fileBuffer.toString('base64');
-
     const result = await model.generateContent([
       EXTRACTION_PROMPT,
-      {
-        inlineData: {
-          mimeType,
-          data: base64,
-        },
-      },
+      { inlineData: { mimeType, data: base64 } },
     ]);
-
-    const rawText = result.response.text().trim();
-
-    // Strip markdown code fences if present (model sometimes wraps anyway)
-    const jsonText = rawText
-      .replace(/^```json?\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-
-    const parsed = JSON.parse(jsonText);
-
-    // Normalise total_dias_afastados to integer
-    if (parsed.total_dias_afastados !== null && parsed.total_dias_afastados !== undefined) {
-      parsed.total_dias_afastados = parseInt(parsed.total_dias_afastados, 10) || 0;
-    } else {
-      parsed.total_dias_afastados = null;
-    }
-
-    return parsed;
+    return normalizeResult(parseJSON(result.response.text().trim()));
   }
 
-  // Primary model
   try {
-    return await tryModel('gemini-2.5-flash');
-  } catch (primaryErr) {
-    const shouldFallback =
-      primaryErr.status === 429 ||
-      (primaryErr.message &&
-        (primaryErr.message.includes('quota') ||
-          primaryErr.message.includes('unavailable') ||
-          primaryErr.message.includes('RESOURCE_EXHAUSTED') ||
-          primaryErr.message.includes('overloaded')));
-
-    if (shouldFallback) {
-      console.warn('[gemini] Primary model unavailable, falling back to lite:', primaryErr.message);
-      return await tryModel('gemini-2.5-flash-lite-preview-06-17');
+    return await callModel('gemini-2.5-flash');
+  } catch (err) {
+    if (isRateLimit(err)) {
+      console.warn('[ai/gemini] Flash rate-limited, trying lite:', err.message);
+      return await callModel('gemini-2.5-flash-lite-preview-06-17');
     }
-    throw primaryErr;
+    throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Provider 2: xAI Grok (OpenAI-compatible)
+// ---------------------------------------------------------------------------
+async function tryGrok(fileBuffer, mimeType) {
+  if (!process.env.GROK_API_KEY) throw new Error('GROK_API_KEY não configurada — skip');
+
+  // Grok supports images natively; PDF is passed as image/jpeg fallback
+  const supportedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  const effectiveMime = supportedMimes.includes(mimeType) ? mimeType : 'image/jpeg';
+
+  const client = new OpenAI({
+    apiKey: process.env.GROK_API_KEY,
+    baseURL: 'https://api.x.ai/v1',
+  });
+
+  const base64 = fileBuffer.toString('base64');
+  const dataUrl = `data:${effectiveMime};base64,${base64}`;
+
+  const response = await client.chat.completions.create({
+    model: 'grok-2-vision-1212',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: EXTRACTION_PROMPT },
+          { type: 'image_url', image_url: { url: dataUrl } },
+        ],
+      },
+    ],
+    max_tokens: 512,
+  });
+
+  const rawText = response.choices[0]?.message?.content?.trim() || '';
+  return normalizeResult(parseJSON(rawText));
+}
+
+// ---------------------------------------------------------------------------
+// Provider 3: OpenRouter (OpenAI-compatible)
+// ---------------------------------------------------------------------------
+async function tryOpenRouter(fileBuffer, mimeType) {
+  if (!process.env.OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY não configurada — skip');
+
+  const supportedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  const effectiveMime = supportedMimes.includes(mimeType) ? mimeType : 'image/jpeg';
+
+  const client = new OpenAI({
+    apiKey: process.env.OPENROUTER_API_KEY,
+    baseURL: 'https://openrouter.ai/api/v1',
+    defaultHeaders: {
+      'HTTP-Referer': 'https://folha-ia.vercel.app',
+      'X-Title': 'Folha IA Araçá Grill',
+    },
+  });
+
+  const base64 = fileBuffer.toString('base64');
+  const dataUrl = `data:${effectiveMime};base64,${base64}`;
+
+  const response = await client.chat.completions.create({
+    model: 'qwen/qwen2.5-vl-72b-instruct:free',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: EXTRACTION_PROMPT },
+          { type: 'image_url', image_url: { url: dataUrl } },
+        ],
+      },
+    ],
+    max_tokens: 512,
+  });
+
+  const rawText = response.choices[0]?.message?.content?.trim() || '';
+  return normalizeResult(parseJSON(rawText));
+}
+
+// ---------------------------------------------------------------------------
+// Public: cascade through all providers
+// ---------------------------------------------------------------------------
+const PROVIDERS = [
+  { name: 'Gemini',      fn: tryGemini      },
+  { name: 'Grok',        fn: tryGrok        },
+  { name: 'OpenRouter',  fn: tryOpenRouter  },
+];
+
+async function extractCertificate(fileBuffer, mimeType) {
+  let lastError;
+
+  for (const { name, fn } of PROVIDERS) {
+    try {
+      const result = await fn(fileBuffer, mimeType);
+      console.log(`[ai] Sucesso com ${name}`);
+      return result;
+    } catch (err) {
+      const msg = err.message || '';
+      const isSkip = msg.includes('— skip');
+      if (!isSkip) {
+        console.warn(`[ai/${name}] Falhou, tentando próximo:`, msg);
+      }
+      lastError = err;
+    }
+  }
+
+  throw new Error(
+    `Todos os provedores de IA falharam. Último erro: ${lastError?.message || 'desconhecido'}`
+  );
 }
 
 module.exports = { extractCertificate };
