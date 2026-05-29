@@ -80,7 +80,7 @@ export default function Step2Page() {
   const hasOpenAmbiguous = ambiguous.length > 0
   const matched = result?.matched || []
   const blocked = result?.blocked || []
-  const notFound = result?.not_found || result?.nao_encontrados || []
+  const notFound = result?.notFound || result?.not_found || result?.nao_encontrados || []
   const ignored = result?.ignored || result?.ignorados || []
 
   return (
@@ -132,9 +132,9 @@ export default function Step2Page() {
                     <tbody>
                       {matched.map((m, idx) => (
                         <tr key={idx} className="border-b border-green-800/10">
-                          <td className="py-2 text-stone-300">{m.alias || m.nome_relatorio}</td>
-                          <td className="py-2 text-stone-200 font-medium">{m.funcionario_nome || m.nome}</td>
-                          <td className="py-2 text-right text-green-300">{formatBRL(m.valor || m.value)}</td>
+                          <td className="py-2 text-stone-300">{m.entries?.[0]?.originalName || m.alias || m.nome_relatorio}</td>
+                          <td className="py-2 text-stone-200 font-medium">{m.funcionario?.nome || m.funcionario_nome || m.nome}</td>
+                          <td className="py-2 text-right text-green-300">{formatBRL(m.total || m.valor || m.value)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -163,15 +163,15 @@ export default function Step2Page() {
                     >
                       <div className="flex items-start gap-3">
                         <div className="flex-1">
-                          <p className="text-yellow-200 font-medium">"{a.alias || a.nome}"</p>
-                          <p className="text-stone-400 text-xs mt-0.5">Candidatos: {(a.candidates || a.candidatos || []).map(c => c.nome).join(', ')}</p>
+                          <p className="text-yellow-200 font-medium">"{a.originalName || a.alias || a.nome}"</p>
+                          <p className="text-stone-400 text-xs mt-0.5">Candidatos: {(a.options || a.candidates || a.candidatos || []).map(c => c.nome).join(', ')}</p>
                         </div>
                         <div className="flex-shrink-0 flex gap-2 flex-wrap">
-                          {(a.candidates || a.candidatos || []).map((c, cidx) => (
+                          {(a.options || a.candidates || a.candidatos || []).map((c, cidx) => (
                             <button
                               key={cidx}
-                              onClick={() => resolveAmbiguous(a.alias || a.nome, c.id)}
-                              disabled={resolving[a.alias || a.nome]}
+                              onClick={() => resolveAmbiguous(a.originalName || a.alias || a.nome, c.id)}
+                              disabled={resolving[a.originalName || a.alias || a.nome]}
                               className="px-3 py-1.5 rounded text-xs font-medium border transition-colors disabled:opacity-50"
                               style={{ borderColor: '#9a7520', color: '#c9a96e' }}
                               onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(154,117,32,0.15)'}
@@ -203,7 +203,7 @@ export default function Step2Page() {
                   {blocked.map((b, idx) => (
                     <div key={idx} className="flex items-center gap-2 text-sm">
                       <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
-                      <span className="text-red-200">{b.alias || b.nome}</span>
+                      <span className="text-red-200">{b.originalName || b.alias || b.nome}</span>
                       {b.motivo && <span className="text-red-400 text-xs">— {b.motivo}</span>}
                     </div>
                   ))}
@@ -226,7 +226,7 @@ export default function Step2Page() {
                   {notFound.map((n, idx) => (
                     <div key={idx} className="flex items-center gap-2 text-sm">
                       <span className="w-2 h-2 rounded-full bg-orange-500 flex-shrink-0" />
-                      <span className="text-orange-200">{n.alias || n.nome || n.valor}</span>
+                      <span className="text-orange-200">{n.originalName || n.alias || n.nome}</span>
                     </div>
                   ))}
                 </div>
@@ -244,7 +244,7 @@ export default function Step2Page() {
                 <div className="space-y-1 max-h-32 overflow-y-auto">
                   {ignored.map((ig, idx) => (
                     <div key={idx} className="text-stone-500 text-xs">
-                      {ig.alias || ig.nome || ig}
+                      {ig.originalName || ig.alias || ig.nome}
                     </div>
                   ))}
                 </div>
