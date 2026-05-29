@@ -182,6 +182,34 @@ async function tryOpenRouter(fileBuffer, mimeType) {
 }
 
 // ---------------------------------------------------------------------------
+// Sanitize: strip API keys from error messages before they propagate
+// ---------------------------------------------------------------------------
+function sanitizeMessage(msg) {
+  if (!msg || typeof msg !== 'string') return msg;
+  return msg
+    // Google API keys (AIza...)
+    .replace(/AIza[A-Za-z0-9_-]{10,}/g, '[REDACTED]')
+    // xAI keys (xai-...)
+    .replace(/xai-[A-Za-z0-9_-]{10,}/g, '[REDACTED]')
+    // OpenRouter / OpenAI sk- keys
+    .replace(/sk-[A-Za-z0-9_-]{10,}/g, '[REDACTED]')
+    // Generic: api_key: VALUE or key=VALUE in URLs
+    .replace(/(api[_-]?key[:=]\s*)[A-Za-z0-9_\-\.]{10,}/gi, '$1[REDACTED]')
+    // Bearer tokens
+    .replace(/(Bearer\s+)[A-Za-z0-9_\-\.]{10,}/gi, '$1[REDACTED]');
+}
+
+function safeError(err) {
+  const sanitized = sanitizeMessage(err.message);
+  if (sanitized !== err.message) {
+    const safe = new Error(sanitized);
+    safe.status = err.status;
+    return safe;
+  }
+  return err;
+}
+
+// ---------------------------------------------------------------------------
 // Public: cascade through all providers
 // ---------------------------------------------------------------------------
 const PROVIDERS = [
@@ -199,12 +227,13 @@ async function extractCertificate(fileBuffer, mimeType) {
       console.log(`[ai] Sucesso com ${name}`);
       return result;
     } catch (err) {
-      const msg = err.message || '';
+      const safe = safeError(err);
+      const msg = safe.message || '';
       const isSkip = msg.includes('— skip');
       if (!isSkip) {
         console.warn(`[ai/${name}] Falhou, tentando próximo:`, msg);
       }
-      lastError = err;
+      lastError = safe;
     }
   }
 

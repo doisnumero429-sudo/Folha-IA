@@ -57,13 +57,16 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
       return res.status(409).json({ error: 'Fechamento já aprovado.' });
     }
 
-    // Extract data via Gemini
+    // Extract data via AI cascade (Gemini → Grok → OpenRouter)
     let extracted = null;
     try {
       extracted = await extractCertificate(req.file.buffer, req.file.mimetype);
-    } catch (geminiErr) {
-      console.error('[atestados] Gemini error:', geminiErr.message);
-      return res.status(502).json({ error: 'Erro ao processar atestado com IA: ' + geminiErr.message });
+    } catch (aiErr) {
+      // Log full detail internally; never expose provider error messages to the client
+      console.error('[atestados] AI extraction failed:', aiErr.message);
+      return res.status(502).json({
+        error: 'Não foi possível processar o atestado com IA. Verifique se o arquivo está legível e tente novamente.',
+      });
     }
 
     // Resolve employee: prefer explicit funcionario_id, else try to match name
@@ -141,7 +144,7 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
     });
   } catch (err) {
     console.error('[atestados/POST]', err);
-    return res.status(500).json({ error: err.message || 'Erro interno.' });
+    return res.status(500).json({ error: 'Erro interno ao processar atestado.' });
   }
 });
 
