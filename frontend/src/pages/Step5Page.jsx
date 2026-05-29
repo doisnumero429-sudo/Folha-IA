@@ -278,7 +278,8 @@ export default function Step5Page() {
       setAtestados(prev => [...prev, newAtestado])
       setUploadResult({ success: true })
     } catch (err) {
-      setUploadResult({ error: err.response?.data?.error || 'Erro ao processar atestado' })
+      const detail = err.response?.data?.error || err.message || 'Erro desconhecido'
+      setUploadResult({ error: detail })
     } finally {
       setLoading(false)
     }
