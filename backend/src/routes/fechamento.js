@@ -519,4 +519,74 @@ router.put('/:id/pendencias/:pendenciaId', auth, async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Helper: verify user password before destructive actions
+// ---------------------------------------------------------------------------
+async function verifyPassword(email, senha) {
+  const { supabase } = require('../db/supabase');
+  const { error } = await supabase.auth.signInWithPassword({ email, password: senha });
+  return !error;
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/fechamento/:id/reabrir — reopen an approved closing
+// ---------------------------------------------------------------------------
+router.post('/:id/reabrir', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { senha } = req.body;
+    if (!senha) return res.status(400).json({ error: 'Senha é obrigatória para reabrir.' });
+
+    const ok = await verifyPassword(req.user.email, senha);
+    if (!ok) return res.status(401).json({ error: 'Senha incorreta.' });
+
+    const { data, error } = await supabaseAdmin
+      .from('fechamentos')
+      .update({ status: 'conferencia', aprovado_por: null, aprovado_em: null })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ error: 'Fechamento não encontrado.' });
+
+    return res.json(data);
+  } catch (err) {
+    console.error('[fechamento/reabrir]', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/fechamento/:id — delete a closing and all related data
+// ---------------------------------------------------------------------------
+router.delete('/:id', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { senha } = req.body;
+    if (!senha) return res.status(400).json({ error: 'Senha é obrigatória para excluir.' });
+
+    const ok = await verifyPassword(req.user.email, senha);
+    if (!ok) return res.status(401).json({ error: 'Senha incorreta.' });
+
+    const { data: fechamento } = await supabaseAdmin
+      .from('fechamentos').select('id').eq('id', id).single();
+    if (!fechamento) return res.status(404).json({ error: 'Fechamento não encontrado.' });
+
+    // Delete in FK-safe order
+    await supabaseAdmin.from('auditoria').delete().eq('fechamento_id', id);
+    await supabaseAdmin.from('faltas_datas').delete().eq('fechamento_id', id);
+    await supabaseAdmin.from('atestados').delete().eq('fechamento_id', id);
+    await supabaseAdmin.from('pendencias').delete().eq('fechamento_id', id);
+    await supabaseAdmin.from('lancamentos').delete().eq('fechamento_id', id);
+    await supabaseAdmin.from('documentos').delete().eq('fechamento_id', id);
+    await supabaseAdmin.from('fechamentos').delete().eq('id', id);
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[fechamento/DELETE]', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
