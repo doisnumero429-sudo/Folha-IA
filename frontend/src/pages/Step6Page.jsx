@@ -58,12 +58,18 @@ function PendenciaItem({ pendencia, employees, onResolve }) {
   const typeMap = {
     blocked: { label: 'Bloqueado', color: '#ef4444', bg: 'rgba(239,68,68,0.08)' },
     bloqueado: { label: 'Bloqueado', color: '#ef4444', bg: 'rgba(239,68,68,0.08)' },
+    proibido: { label: 'Bloqueado', color: '#ef4444', bg: 'rgba(239,68,68,0.08)' },
     ambiguous: { label: 'Ambíguo', color: '#eab308', bg: 'rgba(234,179,8,0.08)' },
     ambiguo: { label: 'Ambíguo', color: '#eab308', bg: 'rgba(234,179,8,0.08)' },
     conflict: { label: 'Conflito', color: '#f97316', bg: 'rgba(249,115,22,0.08)' },
     conflito: { label: 'Conflito', color: '#f97316', bg: 'rgba(249,115,22,0.08)' },
+    conflito_falta_atestado: { label: 'Conflito', color: '#f97316', bg: 'rgba(249,115,22,0.08)' },
+    nao_encontrado: { label: 'Não encontrado', color: '#f97316', bg: 'rgba(249,115,22,0.08)' },
+    ignorado: { label: 'Ignorado', color: '#78716c', bg: 'rgba(120,113,108,0.08)' },
   }
   const typeInfo = typeMap[pendencia.tipo] || { label: pendencia.tipo, color: '#78716c', bg: 'rgba(120,113,108,0.08)' }
+
+  const hasSpecificAction = ['ambiguous', 'ambiguo', 'conflict', 'conflito', 'conflito_falta_atestado'].includes(pendencia.tipo)
 
   return (
     <div
@@ -107,8 +113,24 @@ function PendenciaItem({ pendencia, employees, onResolve }) {
             </div>
           )}
 
+          {/* Generic dismiss button for informational pending items */}
+          {!hasSpecificAction && (
+            <div className="mt-3">
+              <button
+                onClick={() => handleConflictResolve('ciente')}
+                disabled={resolving}
+                className="px-3 py-1.5 rounded text-sm font-medium border transition-colors disabled:opacity-50"
+                style={{ borderColor: '#16a34a', color: '#4ade80' }}
+                onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(22,163,74,0.1)'}
+                onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                ✓ Marcar como ciente
+              </button>
+            </div>
+          )}
+
           {/* Conflict resolution UI */}
-          {(pendencia.tipo === 'conflict' || pendencia.tipo === 'conflito') && (
+          {(pendencia.tipo === 'conflict' || pendencia.tipo === 'conflito' || pendencia.tipo === 'conflito_falta_atestado') && (
             <div className="mt-3 flex items-center gap-2">
               <button
                 onClick={() => handleConflictResolve('afastamento')}
