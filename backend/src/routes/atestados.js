@@ -64,6 +64,7 @@ router.post('/lote', auth, async (req, res) => {
           dias_afastados:  item.total_dias_afastados || 0,
           medico:          item.medico          || null,
           crm:             item.crm             || null,
+          cid:             item.cid             || null,
           nome_extraido:   item.nome_paciente   || null,
         })
         .select()
@@ -160,6 +161,7 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
         dias_afastados: extracted.total_dias_afastados || 0,
         medico:         extracted.medico          || null,
         crm:            extracted.crm             || null,
+        cid:            extracted.cid             || null,
         nome_extraido:  extracted.nome_paciente   || null,
       })
       .select()
@@ -252,6 +254,7 @@ router.put('/:id', auth, async (req, res) => {
       dias_afastados,
       medico,
       crm,
+      cid,
     } = req.body;
 
     const updates = {};
@@ -262,6 +265,7 @@ router.put('/:id', auth, async (req, res) => {
     if (dias_afastados  !== undefined) updates.dias_afastados  = dias_afastados;
     if (medico          !== undefined) updates.medico          = medico;
     if (crm             !== undefined) updates.crm             = crm;
+    if (cid             !== undefined) updates.cid             = cid;
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'Nenhum campo para atualizar.' });

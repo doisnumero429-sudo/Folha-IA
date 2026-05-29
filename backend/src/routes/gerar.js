@@ -54,6 +54,21 @@ async function loadFechamentoData(fechamentoId) {
     lancMap[l.funcionario_id] = l;
   }
 
+  // Historical atestados (all months, for recurrence display in HTML)
+  const funcIds = (todosFunc || []).map(f => f.id);
+  const { data: histAtestadosRaw } = await supabaseAdmin
+    .from('atestados')
+    .select('*, fechamentos(mes, ano)')
+    .in('funcionario_id', funcIds)
+    .neq('fechamento_id', fechamentoId)
+    .order('data_emissao', { ascending: false });
+
+  const histMap = {};
+  for (const a of (histAtestadosRaw || [])) {
+    if (!histMap[a.funcionario_id]) histMap[a.funcionario_id] = [];
+    histMap[a.funcionario_id].push(a);
+  }
+
   // Enrich with faltas dates and atestados; include all employees (zeros for missing)
   const lancamentos = await Promise.all((todosFunc || []).map(async func => {
     const l = lancMap[func.id] || {
@@ -80,6 +95,7 @@ async function loadFechamentoData(fechamentoId) {
       funcionario: func,
       faltasDatas: (faltasDatas || []).map(f => f.data),
       atestados: atestados || [],
+      historicalAtestados: histMap[func.id] || [],
     };
   }));
 

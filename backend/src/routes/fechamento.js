@@ -520,6 +520,70 @@ router.put('/:id/pendencias/:pendenciaId', auth, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/fechamento/:id/faltas/range — add all dates between start and end
+// ---------------------------------------------------------------------------
+router.post('/:id/faltas/range', auth, async (req, res) => {
+  try {
+    const fechamento_id = req.params.id;
+    const { funcionario_id, data_inicio, data_fim } = req.body;
+
+    if (!funcionario_id) return res.status(400).json({ error: 'funcionario_id é obrigatório.' });
+    if (!data_inicio || !data_fim) return res.status(400).json({ error: 'data_inicio e data_fim são obrigatórios.' });
+    if (data_inicio > data_fim) return res.status(400).json({ error: 'data_inicio deve ser anterior a data_fim.' });
+
+    const { data: fechamento } = await supabaseAdmin
+      .from('fechamentos').select('*').eq('id', fechamento_id).single();
+    if (!fechamento) return res.status(404).json({ error: 'Fechamento não encontrado.' });
+    if (fechamento.status === 'aprovado') return res.status(409).json({ error: 'Fechamento aprovado.' });
+
+    // Generate all dates
+    const dates = [];
+    const cur = new Date(data_inicio + 'T12:00:00Z');
+    const end = new Date(data_fim + 'T12:00:00Z');
+    while (cur <= end) {
+      dates.push(cur.toISOString().slice(0, 10));
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    if (dates.length > 31) return res.status(400).json({ error: 'Período máximo de 31 dias por vez.' });
+
+    // Insert each date, skip duplicates
+    const inserted = [];
+    for (const data of dates) {
+      const { data: row, error: insErr } = await supabaseAdmin
+        .from('faltas_datas')
+        .insert({ fechamento_id, funcionario_id: parseInt(funcionario_id), data, justificada: false })
+        .select('*, funcionarios(nome, funcao)')
+        .single();
+      if (!insErr && row) inserted.push(row);
+      // 23505 = duplicate key, skip silently
+    }
+
+    // Recompute DSR
+    const { data: allDatas } = await supabaseAdmin
+      .from('faltas_datas').select('data')
+      .eq('fechamento_id', fechamento_id).eq('funcionario_id', funcionario_id);
+    const { data: atestados } = await supabaseAdmin
+      .from('atestados').select('*')
+      .eq('fechamento_id', fechamento_id).eq('funcionario_id', funcionario_id);
+
+    const allDateStrings = (allDatas || []).map(f => f.data);
+    const computed = computeEmployee(allDateStrings, atestados || [], fechamento.mes, fechamento.ano);
+
+    await supabaseAdmin.from('lancamentos').upsert(
+      { fechamento_id, funcionario_id: parseInt(funcionario_id),
+        faltas: computed.faltas, dsr: computed.dsr,
+        dias_descontados: computed.dias_descontados, dias_afastados: computed.dias_afastados },
+      { onConflict: 'fechamento_id,funcionario_id', ignoreDuplicates: false }
+    );
+
+    return res.status(201).json({ inserted, total: inserted.length, computed });
+  } catch (err) {
+    console.error('[fechamento/faltas/range]', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Helper: verify user password before destructive actions
 // ---------------------------------------------------------------------------
 async function verifyPassword(email, senha) {

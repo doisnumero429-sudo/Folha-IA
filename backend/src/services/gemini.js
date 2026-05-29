@@ -11,7 +11,6 @@
  * Each provider is skipped if its API key is not configured.
  * Falls through on rate-limit, quota, or any error.
  *
- * CID (disease code) is never extracted or stored.
  */
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
@@ -24,7 +23,6 @@ const EXTRACTION_PROMPT = `Analise este atestado médico e extraia as seguintes 
 
 REGRAS IMPORTANTES:
 - Nunca invente dados. Se um campo não estiver visível ou legível, deixe como null.
-- NÃO extraia CID (código de doença). Esse campo deve ficar completamente de fora.
 - Extraia APENAS os campos listados abaixo.
 - Datas no formato YYYY-MM-DD.
 - total_dias_afastados deve ser um número inteiro (não uma string).
@@ -38,7 +36,8 @@ Responda APENAS com JSON válido, sem markdown, sem texto extra, sem bloco de c�
   "periodo_fim": "YYYY-MM-DD ou null",
   "total_dias_afastados": número inteiro ou null,
   "medico": "nome do médico ou null",
-  "crm": "número do CRM (apenas dígitos) ou null"
+  "crm": "número do CRM (apenas dígitos) ou null",
+  "cid": "código CID-10 (ex: J11, M54.5) ou null"
 }`;
 
 // ---------------------------------------------------------------------------
@@ -51,6 +50,7 @@ function normalizeResult(parsed) {
   } else {
     parsed.total_dias_afastados = null;
   }
+  // cid stays as string or null, no normalization needed
   return parsed;
 }
 

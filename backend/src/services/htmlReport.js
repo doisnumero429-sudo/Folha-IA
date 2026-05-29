@@ -69,6 +69,101 @@ function gerarHTML(fechamento, lancamentos, pendencias) {
   // Max for mini bar charts
   const maxVal = Math.max(...lancamentos.map(l => Math.max(Number(l.consumo) || 0, Number(l.vales) || 0)), 1);
 
+const CID10_JS = `const CID10={
+  'A00':'Cólera','A01':'Febre tifóide e paratifóide','A02':'Infecções por Salmonella',
+  'A04':'Outras infecções intestinais bacterianas','A05':'Intoxicações alimentares bacterianas',
+  'A06':'Amebíase','A09':'Diarreia e gastroenterite infecciosa',
+  'A15':'Tuberculose respiratória','A37':'Coqueluche','A38':'Escarlatina',
+  'A46':'Erisipela','A90':'Dengue clássica','A91':'Febre hemorrágica por dengue',
+  'B01':'Varicela (catapora)','B02':'Herpes zóster','B05':'Sarampo','B06':'Rubéola',
+  'B07':'Verrugas virais','B15':'Hepatite A aguda','B16':'Hepatite B aguda',
+  'B18':'Hepatite viral crônica','B24':'HIV/AIDS','B34':'Infecção viral inespecífica',
+  'B35':'Dermatofitose (micose/tinea)','B37':'Candidíase','B54':'Malária',
+  'D50':'Anemia ferropriva','D64':'Outras anemias',
+  'E10':'Diabetes tipo 1','E11':'Diabetes tipo 2','E14':'Diabetes não especificado',
+  'E66':'Obesidade','E78':'Dislipidemia',
+  'F10':'Transtorno por uso de álcool','F17':'Transtorno por uso de tabaco',
+  'F20':'Esquizofrenia','F31':'Transtorno bipolar',
+  'F32':'Episódio depressivo','F33':'Depressão recorrente',
+  'F40':'Fobia','F41':'Transtorno ansioso',
+  'F43':'Reação ao stress / transtorno de adaptação',
+  'F45':'Transtorno somatoforme','F48':'Outros transtornos neuróticos',
+  'G43':'Enxaqueca (migrânea)','G44':'Cefaleia em salvas',
+  'G47':'Distúrbio do sono','G54':'Transtorno de raiz nervosa',
+  'H00':'Hordéolo / calázio (terçol)','H10':'Conjuntivite',
+  'H65':'Otite média não-supurativa','H66':'Otite média supurativa',
+  'I10':'Hipertensão arterial','I11':'Cardiopatia hipertensiva',
+  'I20':'Angina pectoris','I21':'Infarto agudo do miocárdio',
+  'I25':'Doença isquêmica crônica','I48':'Fibrilação/flutter atrial',
+  'I63':'Infarto cerebral','I64':'AVC não especificado',
+  'I80':'Flebite/tromboflebite','I83':'Varizes de membros inferiores',
+  'J00':'Resfriado comum','J01':'Sinusite aguda',
+  'J02':'Faringite aguda','J03':'Amigdalite aguda (tonsilite)',
+  'J04':'Laringite e traqueíte agudas','J06':'Infecção aguda de vias aéreas superiores',
+  'J10':'Gripe (influenza identificada)','J11':'Gripe (vírus não identificado)',
+  'J12':'Pneumonia viral','J13':'Pneumonia a pneumococo',
+  'J15':'Pneumonia bacteriana','J18':'Pneumonia não especificada',
+  'J20':'Bronquite aguda','J22':'Infecção aguda de vias aéreas inferiores',
+  'J30':'Rinite alérgica','J31':'Rinite/faringite crônica',
+  'J32':'Sinusite crônica','J35':'Doenças crônicas das amígdalas',
+  'J40':'Bronquite não especificada','J44':'DPOC',
+  'J45':'Asma','J46':'Estado de mal asmático',
+  'K02':'Cárie dentária','K05':'Gengivite/periodontite',
+  'K20':'Esofagite','K21':'Refluxo gastroesofágico (DRGE)',
+  'K25':'Úlcera gástrica','K26':'Úlcera duodenal',
+  'K29':'Gastrite e duodenite','K30':'Dispepsia',
+  'K35':'Apendicite aguda','K40':'Hérnia inguinal',
+  'K42':'Hérnia umbilical','K50':'Doença de Crohn',
+  'K51':'Colite ulcerativa','K57':'Doença diverticular',
+  'K58':'Síndrome do intestino irritável','K59':'Outros transtornos funcionais intestinais',
+  'K70':'Doença alcoólica do fígado','K74':'Cirrose hepática',
+  'K80':'Colelitíase (cálculo biliar)','K81':'Colecistite',
+  'K85':'Pancreatite aguda',
+  'L01':'Impetigo','L02':'Abscesso/furúnculo','L03':'Celulite',
+  'L20':'Dermatite atópica','L23':'Dermatite de contato alérgica',
+  'L24':'Dermatite de contato por irritante',
+  'L30':'Outras dermatites','L40':'Psoríase','L50':'Urticária',
+  'M05':'Artrite reumatoide','M10':'Gota','M13':'Outras artrites',
+  'M17':'Gonartrose (artrose de joelho)','M19':'Outras artroses',
+  'M25':'Outros transtornos articulares',
+  'M40':'Cifose/lordose','M41':'Escoliose',
+  'M47':'Espondilose','M50':'Transtorno do disco cervical',
+  'M51':'Hérnia de disco intervertebral',
+  'M54':'Dorsalgia / dor nas costas','M65':'Sinovite e tenossinovite',
+  'M75':'Lesão do ombro / tendinite',
+  'M79':'Outros transtornos de tecidos moles',
+  'M80':'Osteoporose com fratura','M81':'Osteoporose sem fratura',
+  'N10':'Nefrite tubulointersticial aguda',
+  'N20':'Litíase renal (pedra nos rins)','N23':'Cólica nefrética',
+  'N30':'Cistite','N39':'Outros transtornos urinários',
+  'N40':'Hiperplasia da próstata','N41':'Prostatite',
+  'O00':'Gravidez ectópica','O21':'Vômitos da gravidez',
+  'R05':'Tosse','R06':'Dispneia','R07':'Dor de garganta/torácica',
+  'R10':'Dor abdominal/pélvica','R11':'Náuseas e vômitos',
+  'R12':'Pirose (azia)','R42':'Tontura/vertigem',
+  'R50':'Febre','R51':'Cefaleia (dor de cabeça)',
+  'R52':'Dor não especificada','R53':'Mal-estar e fadiga',
+  'R55':'Síncope (desmaio)',
+  'S06':'Traumatismo intracraniano',
+  'S12':'Fratura da coluna cervical','S22':'Fratura de costela/tórax',
+  'S32':'Fratura lombar/pélvica','S42':'Fratura de ombro/braço',
+  'S52':'Fratura de antebraço','S62':'Fratura de punho/mão',
+  'S72':'Fratura de fêmur','S82':'Fratura de perna',
+  'S83':'Lesão de joelho','S93':'Entorse de tornozelo',
+  'T14':'Traumatismo de região não especificada',
+  'Z00':'Exame de saúde geral','Z02':'Exame para fins administrativos',
+  'Z09':'Consulta de acompanhamento'
+};
+function getCIDDesc(code){
+  if(!code)return'';
+  const upper=code.toUpperCase().trim();
+  if(CID10[upper])return CID10[upper];
+  const prefix=upper.slice(0,3);
+  if(CID10[prefix])return CID10[prefix]+' (subcategoria '+upper+')';
+  const chapters={'A':'Doenças infecciosas e parasitárias (A)','B':'Doenças infecciosas e parasitárias (B)','C':'Neoplasias malignas','D':'Neoplasias/Sangue','E':'Doenças endócrinas e metabólicas','F':'Transtornos mentais e comportamentais','G':'Doenças do sistema nervoso','H':'Doenças do olho e ouvido','I':'Doenças do aparelho circulatório','J':'Doenças do aparelho respiratório','K':'Doenças do aparelho digestivo','L':'Doenças da pele','M':'Doenças do sistema osteomuscular','N':'Doenças do aparelho geniturinário','O':'Gravidez e parto','P':'Afecções perinatais','Q':'Malformações congênitas','R':'Sintomas e sinais não classificados','S':'Lesões e traumatismos','T':'Intoxicações','Z':'Fatores que influenciam o estado de saúde'};
+  return chapters[upper[0]]||'CID não identificado';
+}`;
+
   // Unique roles for filter buttons
   const roles = [...new Set(lancamentos.map(l => l.funcionario.funcao))].sort();
 
@@ -79,10 +174,23 @@ function gerarHTML(fechamento, lancamentos, pendencias) {
     const chart = miniBarChart(Number(l.consumo) || 0, Number(l.vales) || 0, maxVal);
 
     const faltaDatas = (l.faltasDatas || []).map(d => esc(d)).join(', ') || '—';
-    const certPeriod = (l.atestados  || []).map(a => {
-      if (a.periodo_inicio && a.periodo_fim) return `${esc(a.periodo_inicio)} → ${esc(a.periodo_fim)} (${a.dias_afastados}d)`;
-      return `${a.dias_afastados}d`;
-    }).join('<br>') || '—';
+    const certHtml = (l.atestados || []).length === 0 ? '—' : (l.atestados || []).map(a => {
+      const cidBadge = a.cid
+        ? `<span class="cid-badge" onclick="showCIDModal('${esc(a.cid)}',event)" title="Ver descrição do CID">${esc(a.cid)}</span>`
+        : '';
+      const period = a.periodo_inicio && a.periodo_fim
+        ? `${esc(a.periodo_inicio)} → ${esc(a.periodo_fim)}`
+        : '';
+      return `<div class="cert-item">${cidBadge} ${period ? `<span>${period}</span>` : ''} <span class="cert-days">${a.dias_afastados}d</span> ${a.medico ? `<span class="cert-doctor">Dr. ${esc(a.medico)}</span>` : ''}</div>`;
+    }).join('');
+
+    // Historical recurrence check
+    const currentCIDs = (l.atestados || []).map(a => a.cid).filter(Boolean);
+    const histAtestados = l.historicalAtestados || [];
+    const recurrenceCIDs = currentCIDs.filter(cid => histAtestados.some(ha => ha.cid === cid));
+    const recurrenceHtml = recurrenceCIDs.length > 0
+      ? `<div class="recurrence-warning">⚠️ Recorrência: CID ${recurrenceCIDs.join(', ')} já apareceu em meses anteriores</div>`
+      : '';
 
     return `<tr class="data-row${hasFalta ? ' has-falta' : ''}${hasAtestado ? ' has-atestado' : ''}"
               data-funcao="${esc(l.funcionario.funcao)}"
@@ -109,7 +217,8 @@ function gerarHTML(fechamento, lancamentos, pendencias) {
     <div class="detail-box">
       <div class="detail-grid">
         <div><strong>Faltas:</strong> ${faltaDatas}</div>
-        <div><strong>Atestado(s):</strong> ${certPeriod}</div>
+        <div><strong>Atestado(s):</strong> ${certHtml}</div>
+        ${recurrenceHtml ? `<div style="grid-column:span 2">${recurrenceHtml}</div>` : ''}
       </div>
     </div>
   </td>
@@ -130,6 +239,46 @@ const LANCAMENTOS = ${JSON.stringify(lancamentos.map(l => ({
     dias_afastados: Number(l.dias_afastados) || 0,
   })))};
 `;
+
+  // ── CID summary section ────────────────────────────────────────────────────
+  const atestadosList = lancamentos.filter(l => (l.atestados || []).length > 0);
+  const cidSummaryHtml = atestadosList.length === 0 ? '' : (() => {
+    // Per-employee rows
+    const cidRows = atestadosList.map(l => {
+      const cids = (l.atestados || []).map(a => a.cid).filter(Boolean);
+      const cidBadges = cids.length > 0
+        ? cids.map(c => `<span class="cid-badge" onclick="showCIDModal('${esc(c)}',event)">${esc(c)}</span>`).join(' ')
+        : '<span style="color:#57534e">—</span>';
+      const multiCert = (l.atestados || []).length > 1
+        ? `<span class="recurrence-tag">×${(l.atestados || []).length}</span>`
+        : '';
+      const hasRecurrence = (l.historicalAtestados || []).some(ha => cids.includes(ha.cid));
+      return `<tr${hasRecurrence ? ' class="recurrence-row"' : ''}>
+      <td>${esc(l.funcionario.nome)}</td>
+      <td>${(l.atestados || []).reduce((s, a) => s + (a.dias_afastados || 0), 0)} dias ${multiCert}</td>
+      <td>${cidBadges}</td>
+      <td>${(l.atestados || []).map(a => a.periodo_inicio ? `${esc(a.periodo_inicio)} → ${esc(a.periodo_fim || '?')}` : '—').join('<br>')}</td>
+      ${hasRecurrence ? '<td><span style="color:#f59e0b">⚠️ Recorrente</span></td>' : '<td>—</td>'}
+    </tr>`;
+    }).join('');
+
+    return `
+<div class="atestados-section no-print" id="atestadosSection">
+  <div class="section-title" style="color:#2563eb">Atestados Médicos — ${atestadosList.length} funcionário(s)</div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th style="background:#2563eb">Funcionário</th>
+      <th style="background:#2563eb">Dias Afastados</th>
+      <th style="background:#2563eb">CID(s)</th>
+      <th style="background:#2563eb">Período</th>
+      <th style="background:#2563eb">Histórico</th>
+    </tr></thead>
+    <tbody>${cidRows}</tbody>
+  </table>
+  </div>
+</div>`;
+  })();
 
   // ── HTML ───────────────────────────────────────────────────────────────────
   return `<!DOCTYPE html>
@@ -228,6 +377,24 @@ tbody tr.data-row:nth-child(4n+3) td{background:#fffdf9}
   .totals-row td{background:#ffe!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .cards{display:none}
 }
+
+.cid-badge{display:inline-block;padding:2px 7px;border-radius:12px;font-size:11px;font-weight:700;background:#1e3a5f;color:#93c5fd;border:1px solid #2563eb;cursor:pointer;transition:background .15s}
+.cid-badge:hover{background:#2563eb;color:#fff}
+.cert-item{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:2px 0;font-size:12px}
+.cert-days{color:#2563eb;font-weight:600}
+.cert-doctor{color:#78716c;font-size:11px}
+.recurrence-warning{margin-top:4px;padding:4px 8px;background:#fffbeb;border-radius:4px;font-size:11px;color:#92400e}
+.recurrence-tag{padding:1px 5px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:700}
+.recurrence-row td{background:#fffbeb!important}
+.atestados-section{margin-bottom:20px}
+/* CID Modal */
+#cidModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px}
+#cidModal.hidden{display:none}
+#cidModalBox{background:#fff;border-radius:12px;padding:20px 24px;max-width:360px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+#cidModalCode{font-size:22px;font-weight:800;color:#1e3a5f;margin-bottom:6px}
+#cidModalDesc{font-size:15px;color:#1c1917;margin-bottom:16px}
+#cidModalClose{padding:6px 18px;border-radius:8px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-weight:600}
+#cidModalClose:hover{background:#2563eb}
 
 /* ── Responsive ────────────────────────────────────────────────── */
 @media(max-width:640px){
@@ -328,12 +495,24 @@ ${rows}
 </table>
 </div>
 
+${cidSummaryHtml}
+
+<!-- CID Modal -->
+<div id="cidModal" class="hidden">
+  <div id="cidModalBox">
+    <div id="cidModalCode"></div>
+    <div id="cidModalDesc"></div>
+    <button id="cidModalClose" onclick="closeCIDModal()">Fechar</button>
+  </div>
+</div>
+
 <div class="report-footer">
   Folha IA Araçá Grill &bull; ${esc(titulo)} &bull; Gerado em ${esc(geradoEm)}
 </div>
 </div>
 
 <script>
+${CID10_JS}
 ${scriptData}
 
 // ── State ────────────────────────────────────────────────────────
@@ -450,6 +629,19 @@ function copiarResumo() {
     alert('Resumo copiado!');
   }
 }
+
+
+// ── CID Modal ────────────────────────────────────────────────────
+function showCIDModal(code, event) {
+  event && event.stopPropagation();
+  document.getElementById('cidModalCode').textContent = 'CID ' + code;
+  document.getElementById('cidModalDesc').textContent = getCIDDesc(code);
+  document.getElementById('cidModal').classList.remove('hidden');
+}
+function closeCIDModal() {
+  document.getElementById('cidModal').classList.add('hidden');
+}
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeCIDModal(); });
 
 </script>
 </body>

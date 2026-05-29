@@ -15,7 +15,6 @@ Analise as imagens dos atestados que vou enviar e extraia as informações de CA
 
 REGRAS OBRIGATÓRIAS:
 - NUNCA invente dados. Campo não visível ou ilegível = null.
-- NÃO extraia CID (código de doença) — esse campo não deve constar na resposta.
 - Datas no formato YYYY-MM-DD.
 - total_dias_afastados deve ser um número inteiro.
 - Se o atestado informar apenas quantidade de dias sem as datas exatas, preencha total_dias_afastados e deixe periodo_inicio e periodo_fim como null.
@@ -33,7 +32,8 @@ Formato obrigatório:
   "periodo_fim": "YYYY-MM-DD ou null",
   "total_dias_afastados": número inteiro ou null,
   "medico": "nome completo do médico ou null",
-  "crm": "somente os dígitos do CRM ou null"
+  "crm": "somente os dígitos do CRM ou null",
+  "cid": "código CID-10 (ex: J11, M54) ou null"
 }
 \`\`\`
 
@@ -142,6 +142,7 @@ function AtestadoCard({ atestado, employees, onUpdate, onRemove }) {
           { label: 'Dias Afastados', field: 'dias_afastados', type: 'number' },
           { label: 'Médico', field: 'medico', type: 'text' },
           { label: 'CRM', field: 'crm', type: 'text' },
+          { label: 'CID', field: 'cid', type: 'text' },
         ].map(({ label, field, type }) => (
           <div key={field}>
             <label className="text-stone-500 text-xs block mb-1">{label}</label>
@@ -398,6 +399,7 @@ export default function Step5Page() {
                         <div><span className="text-stone-500 text-xs">Data emissão:</span><br /><span className="text-stone-200">{item.data_emissao || '—'}</span></div>
                         <div><span className="text-stone-500 text-xs">Médico:</span><br /><span className="text-stone-200">{item.medico || '—'}</span></div>
                         <div><span className="text-stone-500 text-xs">CRM:</span><br /><span className="text-stone-200">{item.crm || '—'}</span></div>
+                        <div><span className="text-stone-500 text-xs">CID:</span><br /><span className="text-stone-200">{item.cid || '—'}</span></div>
                       </div>
                       <div>
                         <label className="text-xs text-stone-400 block mb-1">Vincular ao funcionário:</label>
