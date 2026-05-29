@@ -34,7 +34,7 @@ function formatBRL(value) {
  */
 function gerarPDF(fechamento, lancamentos, pendencias) {
   // Lazy-require so the module doesn't crash if pdfmake is unavailable during tests
-  const PdfPrinter = require('pdfmake/build/pdfmake');
+  const PdfPrinter = require('pdfmake/src/printer');
   const pdfFonts   = require('pdfmake/build/vfs_fonts');
 
   const fonts = {

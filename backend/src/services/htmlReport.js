@@ -66,8 +66,6 @@ function gerarHTML(fechamento, lancamentos, pendencias) {
   const totDSR     = lancamentos.reduce((s, l) => s + (Number(l.dsr)     || 0), 0);
   const totDesc    = lancamentos.reduce((s, l) => s + (Number(l.dias_descontados) || 0), 0);
   const totAfas    = lancamentos.reduce((s, l) => s + (Number(l.dias_afastados)   || 0), 0);
-  const totalPend  = (pendencias || []).filter(p => p.status === 'aberta').length;
-
   // Max for mini bar charts
   const maxVal = Math.max(...lancamentos.map(l => Math.max(Number(l.consumo) || 0, Number(l.vales) || 0)), 1);
 
@@ -117,16 +115,6 @@ function gerarHTML(fechamento, lancamentos, pendencias) {
   </td>
 </tr>`;
   }).join('\n');
-
-  // ── Pending items table ────────────────────────────────────────────────────
-  const pendRows = (pendencias || []).map(p => `
-<tr class="pend-row pend-${esc(p.status)}">
-  <td>${esc(p.tipo)}</td>
-  <td>${esc(p.descricao)}</td>
-  <td>${esc(p.nome_original || '')}</td>
-  <td class="td-num">${p.valor != null ? formatBRL(p.valor) : ''}</td>
-  <td><span class="badge badge-${esc(p.status)}">${esc(p.status)}</span></td>
-</tr>`).join('');
 
   // ── Embed data for JS ──────────────────────────────────────────────────────
   const scriptData = `
@@ -270,12 +258,6 @@ tbody tr.data-row:nth-child(4n+3) td{background:#fffdf9}
   </div>
 </div>
 
-${totalPend > 0 ? `
-<!-- Alert banner -->
-<div class="alert-banner no-print">
-  ⚠️ Atenção: há <strong>${totalPend} pendência(s) em aberto</strong> neste fechamento.
-</div>` : ''}
-
 <!-- Summary cards -->
 <div class="cards">
   <div class="card">
@@ -311,7 +293,6 @@ ${totalPend > 0 ? `
   ${roles.map(r => `<button class="btn" onclick="setFilter('funcao:${esc(r)}')">${esc(r)}</button>`).join('')}
   <button class="btn" onclick="setFilter('comFaltas')">Só com faltas</button>
   <button class="btn" onclick="setFilter('comAtestado')">Só com atestado</button>
-  ${totalPend > 0 ? `<button class="btn" onclick="scrollToPendencias()">Ver pendências</button>` : ''}
 </div>
 
 <!-- Main table -->
@@ -346,20 +327,6 @@ ${rows}
   </tbody>
 </table>
 </div>
-
-${(pendencias || []).length > 0 ? `
-<!-- Pending items -->
-<div id="pendenciasSection">
-  <div class="section-title">Pendências (${(pendencias || []).length})</div>
-  <div class="table-wrap">
-  <table>
-    <thead><tr>
-      <th>Tipo</th><th>Descrição</th><th>Nome</th><th class="td-num">Valor</th><th>Status</th>
-    </tr></thead>
-    <tbody>${pendRows}</tbody>
-  </table>
-  </div>
-</div>` : ''}
 
 <div class="report-footer">
   Folha IA Araçá Grill &bull; ${esc(titulo)} &bull; Gerado em ${esc(geradoEm)}
@@ -484,11 +451,6 @@ function copiarResumo() {
   }
 }
 
-// ── Scroll to pendencias ──────────────────────────────────────────
-function scrollToPendencias() {
-  const el = document.getElementById('pendenciasSection');
-  if (el) el.scrollIntoView({ behavior: 'smooth' });
-}
 </script>
 </body>
 </html>`;

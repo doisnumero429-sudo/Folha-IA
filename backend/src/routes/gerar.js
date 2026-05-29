@@ -36,31 +36,48 @@ async function loadFechamentoData(fechamentoId) {
     .single();
   if (fErr || !fechamento) return null;
 
+  // All active employees
+  const { data: todosFunc } = await supabaseAdmin
+    .from('funcionarios')
+    .select('id, nome, funcao')
+    .eq('ativo', true)
+    .order('nome', { ascending: true });
+
   // Lancamentos with employee info
   const { data: lancRaw } = await supabaseAdmin
     .from('lancamentos')
     .select('*, funcionarios(id, nome, funcao)')
-    .eq('fechamento_id', fechamentoId)
-    .order('funcionarios(nome)', { ascending: true });
+    .eq('fechamento_id', fechamentoId);
 
-  // Enrich with faltas dates and atestados
-  const lancamentos = await Promise.all((lancRaw || []).map(async l => {
+  const lancMap = {};
+  for (const l of (lancRaw || [])) {
+    lancMap[l.funcionario_id] = l;
+  }
+
+  // Enrich with faltas dates and atestados; include all employees (zeros for missing)
+  const lancamentos = await Promise.all((todosFunc || []).map(async func => {
+    const l = lancMap[func.id] || {
+      funcionario_id: func.id,
+      consumo: 0, vales: 0, faltas: 0, dsr: 0,
+      dias_descontados: 0, dias_afastados: 0,
+    };
+
     const { data: faltasDatas } = await supabaseAdmin
       .from('faltas_datas')
       .select('data')
       .eq('fechamento_id', fechamentoId)
-      .eq('funcionario_id', l.funcionario_id)
+      .eq('funcionario_id', func.id)
       .order('data', { ascending: true });
 
     const { data: atestados } = await supabaseAdmin
       .from('atestados')
       .select('*')
       .eq('fechamento_id', fechamentoId)
-      .eq('funcionario_id', l.funcionario_id);
+      .eq('funcionario_id', func.id);
 
     return {
       ...l,
-      funcionario: l.funcionarios,
+      funcionario: func,
       faltasDatas: (faltasDatas || []).map(f => f.data),
       atestados: atestados || [],
     };
