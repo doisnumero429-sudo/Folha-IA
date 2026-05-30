@@ -62,6 +62,7 @@ router.post('/lote', auth, async (req, res) => {
     if (fechamento.status === 'aprovado') return res.status(409).json({ error: 'Fechamento já aprovado.' });
 
     const saved = [];
+    const errors = [];
     for (const item of lista) {
       // Resolve employee: explicit id beats name match
       let funcionario_id = item.funcionario_id ? parseInt(item.funcionario_id, 10) : null;
@@ -87,7 +88,11 @@ router.post('/lote', auth, async (req, res) => {
         .select()
         .single();
 
-      if (insErr) { console.error('[atestados/lote] insert error:', insErr.message); continue; }
+      if (insErr) {
+        console.error('[atestados/lote] insert error:', insErr.message);
+        errors.push(insErr.message);
+        continue;
+      }
 
       // Check conflicts
       if (funcionario_id && item.periodo_inicio && item.periodo_fim) {
@@ -115,7 +120,16 @@ router.post('/lote', auth, async (req, res) => {
       await syncDiasAfastados(fechamento_id, empId);
     }
 
-    return res.status(201).json({ saved, total: saved.length });
+    // If nothing was saved but we had items, surface the failure instead of
+    // returning a misleading "success" with zero saved certificates.
+    if (saved.length === 0 && errors.length > 0) {
+      return res.status(500).json({
+        error: 'Não foi possível salvar os atestados: ' + errors[0],
+        errors,
+      });
+    }
+
+    return res.status(201).json({ saved, total: saved.length, errors });
   } catch (err) {
     console.error('[atestados/lote]', err);
     return res.status(500).json({ error: 'Erro ao salvar atestados.' });
@@ -281,17 +295,26 @@ router.put('/:id', auth, async (req, res) => {
       medico,
       crm,
       cid,
+      nome_extraido,
     } = req.body;
 
+    // Empty strings coming from the form must become NULL so Postgres integer/date
+    // columns don't reject them ("invalid input syntax for type integer/date").
+    const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
+
     const updates = {};
-    if (funcionario_id  !== undefined) updates.funcionario_id  = funcionario_id;
-    if (data_emissao    !== undefined) updates.data_emissao    = data_emissao;
-    if (periodo_inicio  !== undefined) updates.periodo_inicio  = periodo_inicio;
-    if (periodo_fim     !== undefined) updates.periodo_fim     = periodo_fim;
-    if (dias_afastados  !== undefined) updates.dias_afastados  = dias_afastados;
-    if (medico          !== undefined) updates.medico          = medico;
-    if (crm             !== undefined) updates.crm             = crm;
-    if (cid             !== undefined) updates.cid             = cid;
+    if (funcionario_id  !== undefined) {
+      const fid = emptyToNull(funcionario_id);
+      updates.funcionario_id = fid === null ? null : parseInt(fid, 10);
+    }
+    if (data_emissao    !== undefined) updates.data_emissao    = emptyToNull(data_emissao);
+    if (periodo_inicio  !== undefined) updates.periodo_inicio  = emptyToNull(periodo_inicio);
+    if (periodo_fim     !== undefined) updates.periodo_fim     = emptyToNull(periodo_fim);
+    if (dias_afastados  !== undefined) updates.dias_afastados  = parseInt(dias_afastados, 10) || 0;
+    if (medico          !== undefined) updates.medico          = emptyToNull(medico);
+    if (crm             !== undefined) updates.crm             = emptyToNull(crm);
+    if (cid             !== undefined) updates.cid             = emptyToNull(cid);
+    if (nome_extraido   !== undefined) updates.nome_extraido   = emptyToNull(nome_extraido);
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'Nenhum campo para atualizar.' });

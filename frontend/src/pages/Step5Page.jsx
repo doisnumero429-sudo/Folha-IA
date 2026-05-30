@@ -144,15 +144,18 @@ function AtestadoCard({ atestado, employees, onUpdate, onRemove }) {
   const [editing, setEditing] = useState(false)
   const [data, setData] = useState({ ...atestado })
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState(null)
 
   async function handleSave() {
     setSaving(true)
+    setSaveError(null)
     try {
-      await api.put(`/atestados/${atestado.id}`, data)
-      onUpdate && onUpdate(data)
+      const res = await api.put(`/atestados/${atestado.id}`, data)
+      onUpdate && onUpdate(res.data || data)
       setEditing(false)
     } catch (err) {
       console.error('Save error:', err)
+      setSaveError(err.response?.data?.error || 'Não foi possível salvar as alterações.')
     } finally {
       setSaving(false)
     }
@@ -244,6 +247,11 @@ function AtestadoCard({ atestado, employees, onUpdate, onRemove }) {
           )}
         </div>
       </div>
+      {saveError && (
+        <div className="mt-3 px-3 py-2 rounded text-xs bg-red-800/30 border border-red-600 text-red-300">
+          {saveError}
+        </div>
+      )}
     </div>
   )
 }

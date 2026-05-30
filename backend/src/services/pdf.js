@@ -37,12 +37,18 @@ function gerarPDF(fechamento, lancamentos, pendencias) {
   const PdfPrinter = require('pdfmake/src/printer');
   const pdfFonts   = require('pdfmake/build/vfs_fonts');
 
+  // The vfs export shape changed across pdfmake versions: older releases expose
+  // it under `pdfFonts.pdfMake.vfs`, while 0.2.x exports the vfs map directly.
+  const vfs = (pdfFonts && pdfFonts.pdfMake && pdfFonts.pdfMake.vfs)
+    || (pdfFonts && pdfFonts.vfs)
+    || pdfFonts;
+
   const fonts = {
     Roboto: {
-      normal:      Buffer.from(pdfFonts.pdfMake.vfs['Roboto-Regular.ttf'],       'base64'),
-      bold:        Buffer.from(pdfFonts.pdfMake.vfs['Roboto-Medium.ttf'],        'base64'),
-      italics:     Buffer.from(pdfFonts.pdfMake.vfs['Roboto-Italic.ttf'],        'base64'),
-      bolditalics: Buffer.from(pdfFonts.pdfMake.vfs['Roboto-MediumItalic.ttf'], 'base64'),
+      normal:      Buffer.from(vfs['Roboto-Regular.ttf'],       'base64'),
+      bold:        Buffer.from(vfs['Roboto-Medium.ttf'],        'base64'),
+      italics:     Buffer.from(vfs['Roboto-Italic.ttf'],        'base64'),
+      bolditalics: Buffer.from(vfs['Roboto-MediumItalic.ttf'], 'base64'),
     },
   };
 
@@ -50,7 +56,7 @@ function gerarPDF(fechamento, lancamentos, pendencias) {
 
   const mesNome    = MONTHS_PT[fechamento.mes - 1];
   const titulo     = `${mesNome}/${fechamento.ano}`;
-  const geradoEm   = new Date().toLocaleString('pt-BR');
+  const geradoEm   = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   const statusText = fechamento.status === 'aprovado'
     ? `APROVADO${fechamento.aprovado_por ? ' — por ' + fechamento.aprovado_por : ''}`
     : 'EM ANDAMENTO';
