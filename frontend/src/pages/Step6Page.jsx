@@ -400,7 +400,7 @@ export default function Step6Page() {
                         <span className="text-amber-400">{l.faltas} falta(s)</span>
                       )}
                       {(parseInt(l.dias_afastados) || 0) > 0 && (
-                        <span className="text-blue-400">{l.dias_afastados} afastado(s)</span>
+                        <span className="text-blue-400">{l.dias_afastados} dia(s) afastado(a)</span>
                       )}
                     </div>
                   </div>

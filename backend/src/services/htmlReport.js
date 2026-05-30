@@ -18,6 +18,14 @@ function formatBRL(value) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 }
 
+// Format an ISO date (YYYY-MM-DD) as Brazilian DD/MM/YYYY. Leaves anything
+// that isn't a plain ISO date untouched, and returns '' for empty values.
+function formatDateBR(value) {
+  if (!value) return '';
+  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(value);
+}
+
 function esc(str) {
   return String(str || '')
     .replace(/&/g, '&amp;')
@@ -83,13 +91,13 @@ function gerarHTML(fechamento, lancamentos, pendencias) {
     const hasAtestado = (l.dias_afastados || 0) > 0;
     const chart = miniBarChart(Number(l.consumo) || 0, Number(l.vales) || 0, maxVal);
 
-    const faltaDatas = (l.faltasDatas || []).map(d => esc(d)).join(', ') || '—';
+    const faltaDatas = (l.faltasDatas || []).map(d => esc(formatDateBR(d))).join(', ') || '—';
     const certHtml = (l.atestados || []).length === 0 ? '—' : (l.atestados || []).map(a => {
       const cidBadge = a.cid
         ? `<span class="cid-badge" onclick="showCIDModal('${esc(a.cid)}',event)" title="Ver descrição do CID">${esc(a.cid)}</span>`
         : '';
       const period = a.periodo_inicio && a.periodo_fim
-        ? `${esc(a.periodo_inicio)} → ${esc(a.periodo_fim)}`
+        ? `${esc(formatDateBR(a.periodo_inicio))} → ${esc(formatDateBR(a.periodo_fim))}`
         : '';
       return `<div class="cert-item">${cidBadge} ${period ? `<span>${period}</span>` : ''} <span class="cert-days">${a.dias_afastados}d</span> ${a.medico ? `<span class="cert-doctor">Dr. ${esc(a.medico)}</span>` : ''}</div>`;
     }).join('');
@@ -167,7 +175,7 @@ const LANCAMENTOS = ${JSON.stringify(lancamentos.map(l => ({
       <td>${esc(l.funcionario.nome)}</td>
       <td>${(l.atestados || []).reduce((s, a) => s + (a.dias_afastados || 0), 0)} dias ${multiCert}</td>
       <td>${cidBadges}</td>
-      <td>${(l.atestados || []).map(a => a.periodo_inicio ? `${esc(a.periodo_inicio)} → ${esc(a.periodo_fim || '?')}` : '—').join('<br>')}</td>
+      <td>${(l.atestados || []).map(a => a.periodo_inicio ? `${esc(formatDateBR(a.periodo_inicio))} → ${esc(formatDateBR(a.periodo_fim) || '?')}` : '—').join('<br>')}</td>
       ${hasRecurrence ? '<td><span style="color:#f59e0b">⚠️ Recorrente</span></td>' : '<td>—</td>'}
     </tr>`;
     }).join('');
