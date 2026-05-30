@@ -20,6 +20,23 @@ const { findConflicts } = require('../services/dsr');
 
 const router  = express.Router();
 const storage = multer.memoryStorage();
+
+// Recompute and persist dias_afastados for a given employee/fechamento
+async function syncDiasAfastados(fechamento_id, funcionario_id) {
+  if (!funcionario_id) return;
+  const { data: ats } = await supabaseAdmin
+    .from('atestados')
+    .select('dias_afastados')
+    .eq('fechamento_id', fechamento_id)
+    .eq('funcionario_id', funcionario_id);
+  const total = (ats || []).reduce((s, a) => s + (Number(a.dias_afastados) || 0), 0);
+  await supabaseAdmin
+    .from('lancamentos')
+    .upsert(
+      { fechamento_id, funcionario_id: parseInt(funcionario_id), dias_afastados: total },
+      { onConflict: 'fechamento_id,funcionario_id', ignoreDuplicates: false }
+    );
+}
 const upload  = multer({
   storage,
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
@@ -90,6 +107,12 @@ router.post('/lote', auth, async (req, res) => {
         }
       }
       saved.push(inserted);
+    }
+
+    // Sync dias_afastados for each distinct employee
+    const empIds = [...new Set(saved.map(s => s.funcionario_id).filter(Boolean))];
+    for (const empId of empIds) {
+      await syncDiasAfastados(fechamento_id, empId);
     }
 
     return res.status(201).json({ saved, total: saved.length });
@@ -178,6 +201,9 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
       nome_arquivo: req.file.originalname,
       tamanho: req.file.size,
     });
+
+    // Sync dias_afastados to lancamentos
+    await syncDiasAfastados(fechamento_id, resolved_funcionario_id);
 
     // Check for conflicts if employee resolved
     let conflicts = [];
@@ -283,6 +309,11 @@ router.put('/:id', auth, async (req, res) => {
     }
     if (!data) {
       return res.status(404).json({ error: 'Atestado não encontrado.' });
+    }
+
+    // Sync dias_afastados (need fechamento_id and funcionario_id from saved record)
+    if (data.funcionario_id && data.fechamento_id) {
+      await syncDiasAfastados(data.fechamento_id, data.funcionario_id);
     }
 
     return res.json(data);

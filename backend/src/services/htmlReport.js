@@ -7,6 +7,40 @@
  * Works offline, mobile-friendly, and print-ready.
  */
 
+// Server-side CID-10 lookup (mirrors CID10_JS embedded in the browser)
+const CID10_SERVER = {
+  'J00':'Rinite aguda (resfriado comum)','J11':'Influenza (gripe) sem vírus identificado',
+  'J06':'Infecção aguda das vias aéreas superiores','J18':'Pneumonia','J45':'Asma',
+  'M54':'Dorsalgia','M54.5':'Lombalgia','M54.4':'Lumbago com ciática',
+  'M51':'Hérnia de disco','M75':'Lesões do ombro','M796':'Dor nos membros',
+  'M543':'Ciatalgia','M79.6':'Dor nos membros','M54.3':'Ciatalgia',
+  'K29':'Gastrite','K21':'Refluxo gastroesofágico','K52':'Gastroenterocolite',
+  'F32':'Episódio depressivo','F41':'Transtorno ansioso','F43':'Reação ao estresse',
+  'I10':'Hipertensão','R51':'Cefaleia','R50':'Febre','R10':'Dor abdominal',
+  'S82':'Fratura da perna','S72':'Fratura do fêmur','T14':'Traumatismo',
+  'W018':'Queda','W01':'Queda no mesmo nível',
+  'N39':'Infecção urinária','H66':'Otite média','H10':'Conjuntivite',
+  'L03':'Celulite','B01':'Varicela','A09':'Gastroenterite infecciosa',
+};
+
+function getCIDDesc(code) {
+  if (!code) return 'Sem CID';
+  const upper = String(code).toUpperCase().trim();
+  if (CID10_SERVER[upper]) return CID10_SERVER[upper];
+  const base = upper.split('.')[0];
+  if (CID10_SERVER[base]) return CID10_SERVER[base] + ' (subcategoria)';
+  const chapter = upper[0];
+  const chapters = {
+    A:'Doenças infecciosas',B:'Doenças parasitárias',C:'Neoplasias malignas',
+    D:'Neoplasias benignas',E:'Doenças endócrinas',F:'Transtornos mentais',
+    G:'Sistema nervoso',H:'Olhos/Ouvidos',I:'Cardiovascular',J:'Respiratório',
+    K:'Digestivo',L:'Pele',M:'Musculoesquelético',N:'Geniturinário',
+    O:'Gravidez/Parto',R:'Sintomas e sinais',S:'Lesões/Traumas',
+    T:'Outros traumas',W:'Causas externas',Z:'Fatores de saúde',
+  };
+  return chapters[chapter] ? `(${chapters[chapter]})` : 'CID não catalogado';
+}
+
 const MONTHS_PT = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
@@ -280,6 +314,81 @@ const LANCAMENTOS = ${JSON.stringify(lancamentos.map(l => ({
 </div>`;
   })();
 
+  // ── CID Intelligence section ──────────────────────────────────────────────
+  // Aggregate all CIDs from current month across all employees
+  const cidFreqMap = {};   // CID → { count, employees: Set, totalDays, historicalCount }
+  for (const l of lancamentos) {
+    for (const a of (l.atestados || [])) {
+      if (!a.cid) continue;
+      const cid = a.cid.toUpperCase().trim();
+      if (!cidFreqMap[cid]) cidFreqMap[cid] = { count: 0, employees: new Set(), totalDays: 0, historicalCount: 0 };
+      cidFreqMap[cid].count++;
+      cidFreqMap[cid].employees.add(l.funcionario.nome);
+      cidFreqMap[cid].totalDays += Number(a.dias_afastados) || 0;
+    }
+    // Count historical occurrences
+    for (const ha of (l.historicalAtestados || [])) {
+      if (!ha.cid) continue;
+      const cid = ha.cid.toUpperCase().trim();
+      if (cidFreqMap[cid]) cidFreqMap[cid].historicalCount++;
+    }
+  }
+
+  // Sort by totalDays desc, then count desc
+  const cidRanked = Object.entries(cidFreqMap).sort((a, b) =>
+    (b[1].totalDays - a[1].totalDays) || (b[1].count - a[1].count)
+  );
+
+  const cidIntelligenceHtml = cidRanked.length === 0 ? '' : (() => {
+    const rows = cidRanked.map(([cid, info]) => {
+      const isCluster = info.employees.size >= 2;
+      const isRecurrent = info.historicalCount > 0;
+      const empList = [...info.employees].join(', ');
+      // Build description from the server-side getCIDDesc function
+      const desc = getCIDDesc(cid);
+      return `<tr${isCluster ? ' style="background:#fff7ed"' : ''}>
+        <td style="font-weight:700;white-space:nowrap">
+          ${esc(cid)}
+          ${isCluster ? '<span style="margin-left:4px;background:#f59e0b;color:#fff;font-size:10px;padding:1px 5px;border-radius:8px">CLUSTER</span>' : ''}
+          ${isRecurrent ? '<span style="margin-left:4px;background:#dc2626;color:#fff;font-size:10px;padding:1px 5px;border-radius:8px">RECORRENTE</span>' : ''}
+        </td>
+        <td style="font-size:12px;color:#374151">${esc(desc)}</td>
+        <td style="text-align:center;font-weight:700">${info.count}</td>
+        <td style="text-align:center;font-weight:700;color:#2563eb">${info.totalDays}</td>
+        <td style="font-size:11px;color:#6b7280">${esc(empList)}</td>
+        <td style="text-align:center;color:${isRecurrent ? '#dc2626' : '#9ca3af'};font-weight:${isRecurrent ? '700' : '400'}">${info.historicalCount > 0 ? info.historicalCount + '×' : '—'}</td>
+      </tr>`;
+    }).join('');
+
+    const clusterWarnings = cidRanked.filter(([, info]) => info.employees.size >= 2);
+    const clusterAlert = clusterWarnings.length > 0
+      ? `<div style="background:#fff7ed;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#92400e">
+          <strong>⚠️ Atenção — Cluster detectado:</strong> ${clusterWarnings.map(([cid, info]) =>
+            `CID ${cid} afetou ${info.employees.size} funcionários (${[...info.employees].join(', ')})`).join(' | ')}
+        </div>`
+      : '';
+
+    return `
+<div class="no-print" style="background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:20px">
+  <div style="font-size:15px;font-weight:700;margin-bottom:10px;color:#1c1917">Análise de CIDs — Mês Atual</div>
+  ${clusterAlert}
+  <div style="overflow-x:auto">
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr style="background:#1d4ed8;color:#fff">
+      <th style="padding:7px 10px;text-align:left;white-space:nowrap">CID</th>
+      <th style="padding:7px 10px;text-align:left">Doença / Condição</th>
+      <th style="padding:7px 10px;text-align:center">Ocorr.</th>
+      <th style="padding:7px 10px;text-align:center">Dias perdidos</th>
+      <th style="padding:7px 10px;text-align:left">Funcionário(s)</th>
+      <th style="padding:7px 10px;text-align:center;white-space:nowrap">Histórico</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  </div>
+  <p style="font-size:10px;color:#9ca3af;margin-top:8px">CLUSTER = mesmo CID em 2+ funcionários no mesmo mês. RECORRENTE = CID já apareceu em meses anteriores.</p>
+</div>`;
+  })();
+
   // ── HTML ───────────────────────────────────────────────────────────────────
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -505,6 +614,8 @@ ${cidSummaryHtml}
     <button id="cidModalClose" onclick="closeCIDModal()">Fechar</button>
   </div>
 </div>
+
+${cidIntelligenceHtml}
 
 <div class="report-footer">
   Folha IA Araçá Grill &bull; ${esc(titulo)} &bull; Gerado em ${esc(geradoEm)}

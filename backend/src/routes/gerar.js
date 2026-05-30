@@ -90,8 +90,10 @@ async function loadFechamentoData(fechamentoId) {
       .eq('fechamento_id', fechamentoId)
       .eq('funcionario_id', func.id);
 
+    const diasAfastados = (atestados || []).reduce((s, a) => s + (Number(a.dias_afastados) || 0), 0);
     return {
       ...l,
+      dias_afastados: diasAfastados,
       funcionario: func,
       faltasDatas: (faltasDatas || []).map(f => f.data),
       atestados: atestados || [],
@@ -104,6 +106,7 @@ async function loadFechamentoData(fechamentoId) {
     .from('pendencias')
     .select('*')
     .eq('fechamento_id', fechamentoId)
+    .eq('status', 'aberta')
     .order('created_at', { ascending: true });
 
   return { fechamento, lancamentos, pendencias: pendencias || [] };
