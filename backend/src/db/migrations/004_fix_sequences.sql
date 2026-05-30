@@ -8,20 +8,6 @@
 -- Resync each sequence to MAX(id) so the next insert uses a free id.
 -- Idempotent — safe to run multiple times.
 
-SELECT setval(
-  pg_get_serial_sequence('funcionarios', 'id'),
-  GREATEST((SELECT COALESCE(MAX(id), 0) FROM funcionarios), 1),
-  (SELECT COUNT(*) > 0 FROM funcionarios)
-);
-
-SELECT setval(
-  pg_get_serial_sequence('correlacoes', 'id'),
-  GREATEST((SELECT COALESCE(MAX(id), 0) FROM correlacoes), 1),
-  (SELECT COUNT(*) > 0 FROM correlacoes)
-);
-
-SELECT setval(
-  pg_get_serial_sequence('proibidos', 'id'),
-  GREATEST((SELECT COALESCE(MAX(id), 0) FROM proibidos), 1),
-  (SELECT COUNT(*) > 0 FROM proibidos)
-);
+SELECT setval(pg_get_serial_sequence('funcionarios', 'id'), COALESCE((SELECT MAX(id) FROM funcionarios), 1), true);
+SELECT setval(pg_get_serial_sequence('correlacoes', 'id'),  COALESCE((SELECT MAX(id) FROM correlacoes),  1), true);
+SELECT setval(pg_get_serial_sequence('proibidos', 'id'),    COALESCE((SELECT MAX(id) FROM proibidos),    1), true);
