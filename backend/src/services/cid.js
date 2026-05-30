@@ -87,6 +87,11 @@ const CID_DB = {
   S93: { descricao: 'Entorse de tornozelo', simples: 'Torção no tornozelo', explica: 'Dor e inchaço no tornozelo após torção.' },
   T14: { descricao: 'Traumatismo de região não especificada', simples: 'Machucado / trauma', explica: 'Lesão ou machucado por acidente.' },
 
+  // ── W — Acidentes externos ─────────────────────────────────────────
+  W01: { descricao: 'Queda no mesmo nível por escorregamento ou tropeção', simples: 'Queda por escorregão', explica: 'Queda causada por escorregamento, tropeção ou cambaleio — pode gerar contusão, torção ou fratura.' },
+  W19: { descricao: 'Queda não especificada', simples: 'Queda sem especificação', explica: 'Queda acidental sem detalhamento do mecanismo.' },
+  W50: { descricao: 'Golpe, pancada, pontapé por outra pessoa', simples: 'Pancada de outra pessoa', explica: 'Lesão por contato físico acidental com outra pessoa.' },
+
   // ── Z — Acompanhamento ─────────────────────────────────────────────
   Z00: { descricao: 'Exame médico geral', simples: 'Consulta / exame', explica: 'Avaliação ou exame de rotina.' },
   Z09: { descricao: 'Consulta de acompanhamento', simples: 'Retorno médico', explica: 'Consulta de acompanhamento após tratamento.' },
@@ -153,15 +158,21 @@ function normalizeCid(code) {
  * @returns {{cid, descricao, simples, explica, encontrada}}
  *   encontrada=false means the code wasn't precisely found (caller shows
  *   "Não encontrada" + friendly message). cid='' when no code was provided.
+ *
+ * Lookup order (handles Brazilian dotless notation, e.g. M543 = M54.3):
+ *   1. Exact: CID_DB["M543"]
+ *   2. After dot: CID_DB["M54"]  (for M54.3 with dot)
+ *   3. 3-char prefix: CID_DB["M54"]  (for M543 without dot)
+ *   4. Chapter fallback: CHAPTERS["M"]
  */
 function getCidInfo(code) {
   const cid = normalizeCid(code);
   if (!cid) {
     return { cid: '', descricao: '', simples: '', explica: '', encontrada: false };
   }
-  // Exact match, then base (strip subcategory after the dot, e.g. M54.5 → M54).
-  const base = cid.split('.')[0];
-  const hit = CID_DB[cid] || CID_DB[base];
+  const dotBase  = cid.split('.')[0];                        // M54.3 → M54 | M543 → M543
+  const prefix3  = cid.length > 3 ? cid.slice(0, 3) : null; // M543 → M54  | W018 → W01
+  const hit = CID_DB[cid] || CID_DB[dotBase] || (prefix3 ? CID_DB[prefix3] : null);
   if (hit) {
     return { cid, descricao: hit.descricao, simples: hit.simples, explica: hit.explica, encontrada: true };
   }
@@ -211,8 +222,9 @@ function cidNormalize(code){return String(code||'').toUpperCase().trim().replace
 function getCidInfo(code){
   const cid=cidNormalize(code);
   if(!cid)return{cid:'',descricao:'',simples:'',explica:'',encontrada:false};
-  const base=cid.split('.')[0];
-  const hit=CID_DB[cid]||CID_DB[base];
+  const dotBase=cid.split('.')[0];
+  const prefix3=cid.length>3?cid.slice(0,3):null;
+  const hit=CID_DB[cid]||CID_DB[dotBase]||(prefix3?CID_DB[prefix3]:null);
   if(hit)return{cid:cid,descricao:hit.descricao,simples:hit.simples,explica:hit.explica,encontrada:true};
   const ch=CID_CHAPTERS[cid[0]];
   if(ch)return{cid:cid,descricao:ch,simples:ch,explica:'Categoria geral — descrição específica não localizada.',encontrada:false};
