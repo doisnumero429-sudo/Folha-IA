@@ -59,7 +59,18 @@ Executar no Supabase SQL Editor:
 
 -- 2. Popular dados iniciais
 -- Cole o conteúdo de: backend/src/db/migrations/002_seed_data.sql
+
+-- 3. Adicionar coluna CID nos atestados (OBRIGATÓRIO)
+-- Cole o conteúdo de: backend/src/db/migrations/003_add_cid.sql
+
+-- 4. Corrigir sequências SERIAL
+-- Cole o conteúdo de: backend/src/db/migrations/004_fix_sequences.sql
 ```
+
+> **Importante:** rode TODAS as migrações na ordem (001 → 004). Se a `003`
+> não for aplicada, a tabela `atestados` fica sem a coluna `cid` e o
+> salvamento de atestados falha. O backend tolera essa coluna ausente (salva
+> sem o CID), mas o ideal é aplicar a migração para que o CID seja gravado.
 
 ## Variáveis de Ambiente
 

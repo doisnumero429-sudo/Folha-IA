@@ -37,6 +37,47 @@ async function syncDiasAfastados(fechamento_id, funcionario_id) {
       { onConflict: 'fechamento_id,funcionario_id', ignoreDuplicates: false }
     );
 }
+
+// ---------------------------------------------------------------------------
+// Resilience: the `cid` column is added by migration 003. On databases where
+// that migration hasn't been applied yet, PostgREST rejects any write that
+// references `cid` (error PGRST204 / "could not find the 'cid' column"), which
+// previously made EVERY atestado fail to save. We detect that specific case
+// and transparently retry the write without `cid` so atestados still save.
+// (Once migration 003 is applied, cid is persisted normally.)
+// ---------------------------------------------------------------------------
+function isMissingCidError(error) {
+  if (!error) return false;
+  const msg = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`.toLowerCase();
+  return msg.includes('cid') && (
+    error.code === 'PGRST204' ||
+    msg.includes('does not exist') ||
+    msg.includes('schema cache') ||
+    msg.includes('could not find')
+  );
+}
+
+async function insertAtestado(row) {
+  const run = (payload) => supabaseAdmin.from('atestados').insert(payload).select().single();
+  let res = await run(row);
+  if (res.error && 'cid' in row && isMissingCidError(res.error)) {
+    console.warn('[atestados] coluna "cid" ausente — salvando sem cid. Aplique a migração 003_add_cid.sql no Supabase.');
+    const { cid, ...rest } = row;
+    res = await run(rest);
+  }
+  return res;
+}
+
+async function updateAtestado(id, updates) {
+  const run = (payload) => supabaseAdmin.from('atestados').update(payload).eq('id', id).select().single();
+  let res = await run(updates);
+  if (res.error && 'cid' in updates && isMissingCidError(res.error)) {
+    console.warn('[atestados] coluna "cid" ausente — atualizando sem cid. Aplique a migração 003_add_cid.sql no Supabase.');
+    const { cid, ...rest } = updates;
+    res = await run(rest);
+  }
+  return res;
+}
 const upload  = multer({
   storage,
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
@@ -71,22 +112,18 @@ router.post('/lote', auth, async (req, res) => {
         if (matchResult.type === 'match') funcionario_id = matchResult.funcionario.id;
       }
 
-      const { data: inserted, error: insErr } = await supabaseAdmin
-        .from('atestados')
-        .insert({
-          fechamento_id,
-          funcionario_id:  funcionario_id || null,
-          data_emissao:    item.data_emissao   || null,
-          periodo_inicio:  item.periodo_inicio  || null,
-          periodo_fim:     item.periodo_fim     || null,
-          dias_afastados:  item.total_dias_afastados || 0,
-          medico:          item.medico          || null,
-          crm:             item.crm             || null,
-          cid:             item.cid             || null,
-          nome_extraido:   item.nome_paciente   || null,
-        })
-        .select()
-        .single();
+      const { data: inserted, error: insErr } = await insertAtestado({
+        fechamento_id,
+        funcionario_id:  funcionario_id || null,
+        data_emissao:    item.data_emissao   || null,
+        periodo_inicio:  item.periodo_inicio  || null,
+        periodo_fim:     item.periodo_fim     || null,
+        dias_afastados:  item.total_dias_afastados || 0,
+        medico:          item.medico          || null,
+        crm:             item.crm             || null,
+        cid:             item.cid             || null,
+        nome_extraido:   item.nome_paciente   || null,
+      });
 
       if (insErr) {
         console.error('[atestados/lote] insert error:', insErr.message);
@@ -187,22 +224,18 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
     }
 
     // Save atestado
-    const { data: saved, error: saveErr } = await supabaseAdmin
-      .from('atestados')
-      .insert({
-        fechamento_id,
-        funcionario_id: resolved_funcionario_id || null,
-        data_emissao:   extracted.data_emissao   || null,
-        periodo_inicio: extracted.periodo_inicio  || null,
-        periodo_fim:    extracted.periodo_fim      || null,
-        dias_afastados: extracted.total_dias_afastados || 0,
-        medico:         extracted.medico          || null,
-        crm:            extracted.crm             || null,
-        cid:            extracted.cid             || null,
-        nome_extraido:  extracted.nome_paciente   || null,
-      })
-      .select()
-      .single();
+    const { data: saved, error: saveErr } = await insertAtestado({
+      fechamento_id,
+      funcionario_id: resolved_funcionario_id || null,
+      data_emissao:   extracted.data_emissao   || null,
+      periodo_inicio: extracted.periodo_inicio  || null,
+      periodo_fim:    extracted.periodo_fim      || null,
+      dias_afastados: extracted.total_dias_afastados || 0,
+      medico:         extracted.medico          || null,
+      crm:            extracted.crm             || null,
+      cid:            extracted.cid             || null,
+      nome_extraido:  extracted.nome_paciente   || null,
+    });
 
     if (saveErr) {
       return res.status(500).json({ error: 'Erro ao salvar atestado: ' + saveErr.message });
@@ -320,12 +353,7 @@ router.put('/:id', auth, async (req, res) => {
       return res.status(400).json({ error: 'Nenhum campo para atualizar.' });
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('atestados')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
+    const { data, error } = await updateAtestado(id, updates);
 
     if (error) {
       return res.status(500).json({ error: error.message });
