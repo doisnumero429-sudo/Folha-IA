@@ -29,3 +29,6 @@ npm-debug.log*
 
 # Vite
 frontend/.vite/
+
+# Claude Code internal state
+.claude/
