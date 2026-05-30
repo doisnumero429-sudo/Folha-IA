@@ -9,7 +9,7 @@ import { formatDate } from '../utils/format'
 // ---------------------------------------------------------------------------
 // Prompt to copy to ChatGPT
 // ---------------------------------------------------------------------------
-const CHATGPT_PROMPT = `Você é um assistente especializado em leitura de atestados médicos brasileiros.
+const CHATGPT_PROMPT = `Você é um assistente especializado em leitura e análise de atestados médicos brasileiros.
 
 Analise as imagens que vou enviar e extraia as informações de CADA documento.
 
@@ -42,6 +42,35 @@ Analise as imagens que vou enviar e extraia as informações de CADA documento.
 - cid: código CID-10 como está no documento (ex: M796, J11, M54.5). Se não houver CID = null.
 - nome_paciente: nome completo como escrito no documento.
 
+━━━ CAMPOS DE ANÁLISE CLÍNICA ━━━
+
+Para cada atestado, preencha também os campos abaixo com base no CID e no contexto:
+
+• categoria_cid: classifique o CID na categoria mais adequada:
+  → "Osteomuscular" (M00–M99): dores, lesões articulares, tendões, coluna
+  → "Respiratório" (J00–J99): gripes, pneumonias, bronquites, sinusite
+  → "Mental" (F00–F99): ansiedade, depressão, estresse, burnout
+  → "Acidente/Trauma" (S00–T98): fraturas, contusões, torções
+  → "Digestivo" (K00–K93): gastrite, diarreia, refluxo
+  → "Cardiovascular" (I00–I99): pressão alta, cardiopatias
+  → "Geniturinário" (N00–N99): infecção urinária, condições renais
+  → "Neurológico" (G00–G99): enxaqueca, neuropatias
+  → "Infeccioso" (A00–B99): dengue, viral, bacteriano
+  → "Outro": demais casos
+  → null se não houver CID
+
+• interpretacao_contextual: escreva 1-2 frases interpretando o caso de forma contextual.
+  → Ex: "Dorsalgia aguda com 5 dias de afastamento — episódio típico de dor lombar, possivelmente relacionado a esforço físico."
+  → Ex: "Influenza com 3 dias — quadro agudo de curta duração, baixo risco de prolongamento."
+  → Ex: "Fratura do antebraço — afastamento significativo esperado; retorno deve ser acompanhado."
+  → Se não houver CID ou contexto suficiente: null
+
+• risco_recorrencia: estime o risco de o funcionário apresentar novos afastamentos pelo mesmo motivo:
+  → "baixo": condições agudas e auto-limitadas (gripe, resfriado, acidente pontual, conjuntivite)
+  → "médio": condições que tendem a recorrer ou se cronicizar (dorsalgia, sinusite, gastrite, ansiedade leve)
+  → "alto": condições com alto potencial de recorrência ou cronicidade (depressão, lombalgia crônica, tendinite, hérnia de disco, hipertensão descompensada)
+  → null se não houver CID
+
 ━━━ FORMATO DE RESPOSTA ━━━
 
 Responda APENAS com um bloco de código JSON, sem nenhum texto antes ou depois.
@@ -57,7 +86,10 @@ Se forem MÚLTIPLOS documentos → retorne um array JSON com um objeto por docum
   "total_dias_afastados": número inteiro ou null,
   "medico": "nome completo do médico ou null",
   "crm": "somente os dígitos do CRM ou null",
-  "cid": "código CID-10 como está no documento ou null"
+  "cid": "código CID-10 como está no documento ou null",
+  "categoria_cid": "categoria conforme lista acima ou null",
+  "interpretacao_contextual": "interpretação em 1-2 frases ou null",
+  "risco_recorrencia": "baixo | médio | alto ou null"
 }
 \`\`\`
 
@@ -549,6 +581,31 @@ export default function Step5Page() {
                             {inp('crm', 'text', 'Somente dígitos')}
                           </div>
                         </div>
+
+                        {/* AI analysis chips (read-only) */}
+                        {(item.categoria_cid || item.interpretacao_contextual || item.risco_recorrencia) && (
+                          <div className="col-span-2 rounded-lg px-3 py-2.5 mt-1" style={{ backgroundColor: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
+                            <p className="text-xs font-semibold text-blue-400 mb-2">🤖 Análise da IA</p>
+                            <div className="flex flex-wrap gap-2 mb-2">
+                              {item.categoria_cid && (
+                                <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>
+                                  📂 {item.categoria_cid}
+                                </span>
+                              )}
+                              {item.risco_recorrencia && (
+                                <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{
+                                  backgroundColor: item.risco_recorrencia === 'alto' ? 'rgba(220,38,38,0.15)' : item.risco_recorrencia === 'médio' ? 'rgba(245,158,11,0.15)' : 'rgba(22,163,74,0.15)',
+                                  color: item.risco_recorrencia === 'alto' ? '#f87171' : item.risco_recorrencia === 'médio' ? '#fbbf24' : '#4ade80'
+                                }}>
+                                  {item.risco_recorrencia === 'alto' ? '🔴' : item.risco_recorrencia === 'médio' ? '🟡' : '🟢'} Risco {item.risco_recorrencia}
+                                </span>
+                              )}
+                            </div>
+                            {item.interpretacao_contextual && (
+                              <p className="text-xs text-stone-300 italic leading-relaxed">{item.interpretacao_contextual}</p>
+                            )}
+                          </div>
+                        )}
 
                         {/* Employee binding */}
                         <div>

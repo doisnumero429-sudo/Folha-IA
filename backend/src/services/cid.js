@@ -104,6 +104,46 @@ const CHAPTERS = {
   T: 'Lesão / intoxicação', W: 'Acidente / causa externa', Z: 'Acompanhamento de saúde',
 };
 
+// Category map (first letter → broad category label used in the report UI)
+const CATEGORY_MAP = {
+  M: 'Osteomuscular',
+  S: 'Acidente/Trauma', T: 'Acidente/Trauma',
+  J: 'Respiratório',
+  F: 'Mental',
+  K: 'Digestivo',
+  I: 'Cardiovascular',
+  N: 'Geniturinário',
+  G: 'Neurológico',
+  Z: 'Preventivo',
+  A: 'Infeccioso', B: 'Infeccioso',
+  C: 'Oncológico', D: 'Oncológico',
+  E: 'Endócrino',
+  H: 'Sensorial',
+  L: 'Pele',
+  O: 'Maternidade',
+  R: 'Sintomas gerais',
+};
+
+// Severity per category (for "pode causar afastamento?" in CID modal)
+const SEVERITY_MAP = {
+  Mental:         { nivel: 'alto',  text: 'Alto potencial — pode exigir afastamento prolongado.' },
+  'Acidente/Trauma': { nivel: 'alto', text: 'Alto potencial — depende da extensão da lesão.' },
+  Osteomuscular:  { nivel: 'médio', text: 'Médio — pode variar de dias a semanas.' },
+  Cardiovascular: { nivel: 'alto',  text: 'Alto potencial — exige avaliação médica.' },
+  Oncológico:     { nivel: 'alto',  text: 'Alto potencial — tratamento frequentemente longo.' },
+  Respiratório:   { nivel: 'baixo', text: 'Geralmente curto (3-7 dias).' },
+  Infeccioso:     { nivel: 'baixo', text: 'Geralmente curto (1-7 dias).' },
+  'Sintomas gerais': { nivel: 'baixo', text: 'Geralmente afastamento curto.' },
+  Digestivo:      { nivel: 'baixo', text: 'Geralmente curto (1-5 dias).' },
+  Neurológico:    { nivel: 'médio', text: 'Pode variar; enxaqueca costuma ser 1-2 dias.' },
+  Endócrino:      { nivel: 'médio', text: 'Depende da estabilidade da condição.' },
+  Geniturinário:  { nivel: 'baixo', text: 'Geralmente curto (1-5 dias).' },
+  Sensorial:      { nivel: 'baixo', text: 'Geralmente afastamento curto.' },
+  Pele:           { nivel: 'médio', text: 'Depende da extensão da infecção ou lesão.' },
+  Maternidade:    { nivel: 'alto',  text: 'Licença maternidade prevista em lei.' },
+  Preventivo:     { nivel: 'baixo', text: 'Consulta ou exame de rotina; geralmente sem afastamento.' },
+};
+
 function normalizeCid(code) {
   return String(code || '').toUpperCase().trim().replace(/\s+/g, '');
 }
@@ -140,13 +180,33 @@ function getCidInfo(code) {
 }
 
 /**
+ * Return the broad occupational-health category for a CID code.
+ * Used both on the server (report sections) and embedded into the HTML client.
+ */
+function getCategoria(code) {
+  if (!code) return 'Outro';
+  const letter = normalizeCid(code)[0] || '';
+  return CATEGORY_MAP[letter] || 'Outro';
+}
+
+/**
+ * Return the severity descriptor for a CID code.
+ */
+function getSeveridade(code) {
+  const cat = getCategoria(code);
+  return SEVERITY_MAP[cat] || { nivel: 'médio', text: 'Depende da condição específica.' };
+}
+
+/**
  * Build the JS embedded in the standalone HTML report, exposing the same
- * CID_DB, CHAPTERS and a getCidInfo() so the downloaded file works offline.
+ * CID_DB, CHAPTERS, getCategoria and getSeveridade so the file works offline.
  */
 function buildClientCidScript() {
   return `
 const CID_DB = ${JSON.stringify(CID_DB)};
 const CID_CHAPTERS = ${JSON.stringify(CHAPTERS)};
+const CID_CATEGORY_MAP = ${JSON.stringify(CATEGORY_MAP)};
+const CID_SEVERITY_MAP = ${JSON.stringify(SEVERITY_MAP)};
 function cidNormalize(code){return String(code||'').toUpperCase().trim().replace(/\\s+/g,'');}
 function getCidInfo(code){
   const cid=cidNormalize(code);
@@ -157,7 +217,16 @@ function getCidInfo(code){
   const ch=CID_CHAPTERS[cid[0]];
   if(ch)return{cid:cid,descricao:ch,simples:ch,explica:'Categoria geral — descrição específica não localizada.',encontrada:false};
   return{cid:cid,descricao:'',simples:'',explica:'',encontrada:false};
+}
+function getCategoriaCid(code){
+  if(!code)return'Outro';
+  const letter=cidNormalize(code)[0]||'';
+  return CID_CATEGORY_MAP[letter]||'Outro';
+}
+function getSeveridadeCid(code){
+  const cat=getCategoriaCid(code);
+  return CID_SEVERITY_MAP[cat]||{nivel:'médio',text:'Depende da condição específica.'};
 }`;
 }
 
-module.exports = { getCidInfo, buildClientCidScript, CID_DB };
+module.exports = { getCidInfo, buildClientCidScript, getCategoria, getSeveridade, CID_DB };

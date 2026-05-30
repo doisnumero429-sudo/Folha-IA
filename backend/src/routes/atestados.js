@@ -39,17 +39,18 @@ async function syncDiasAfastados(fechamento_id, funcionario_id) {
 }
 
 // ---------------------------------------------------------------------------
-// Resilience: the `cid` column is added by migration 003. On databases where
-// that migration hasn't been applied yet, PostgREST rejects any write that
-// references `cid` (error PGRST204 / "could not find the 'cid' column"), which
-// previously made EVERY atestado fail to save. We detect that specific case
-// and transparently retry the write without `cid` so atestados still save.
-// (Once migration 003 is applied, cid is persisted normally.)
+// Resilience: optional columns (cid, categoria_cid, interpretacao_contextual,
+// risco_recorrencia) are added by migrations 003/005. On databases where those
+// migrations haven't been applied yet, PostgREST returns PGRST204. We detect
+// this and transparently retry the write without the optional columns so
+// atestados still save. Once migrations are applied the fields persist normally.
 // ---------------------------------------------------------------------------
-function isMissingCidError(error) {
+const OPTIONAL_AI_COLS = ['cid', 'categoria_cid', 'interpretacao_contextual', 'risco_recorrencia'];
+
+function isMissingColumnError(error) {
   if (!error) return false;
   const msg = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`.toLowerCase();
-  return msg.includes('cid') && (
+  return (
     error.code === 'PGRST204' ||
     msg.includes('does not exist') ||
     msg.includes('schema cache') ||
@@ -60,10 +61,11 @@ function isMissingCidError(error) {
 async function insertAtestado(row) {
   const run = (payload) => supabaseAdmin.from('atestados').insert(payload).select().single();
   let res = await run(row);
-  if (res.error && 'cid' in row && isMissingCidError(res.error)) {
-    console.warn('[atestados] coluna "cid" ausente — salvando sem cid. Aplique a migração 003_add_cid.sql no Supabase.');
-    const { cid, ...rest } = row;
-    res = await run(rest);
+  if (res.error && isMissingColumnError(res.error)) {
+    console.warn('[atestados] coluna opcional ausente — salvando sem campos IA. Aplique as migrações pendentes no Supabase.');
+    const stripped = { ...row };
+    for (const col of OPTIONAL_AI_COLS) delete stripped[col];
+    res = await run(stripped);
   }
   return res;
 }
@@ -71,10 +73,11 @@ async function insertAtestado(row) {
 async function updateAtestado(id, updates) {
   const run = (payload) => supabaseAdmin.from('atestados').update(payload).eq('id', id).select().single();
   let res = await run(updates);
-  if (res.error && 'cid' in updates && isMissingCidError(res.error)) {
-    console.warn('[atestados] coluna "cid" ausente — atualizando sem cid. Aplique a migração 003_add_cid.sql no Supabase.');
-    const { cid, ...rest } = updates;
-    res = await run(rest);
+  if (res.error && isMissingColumnError(res.error)) {
+    console.warn('[atestados] coluna opcional ausente — atualizando sem campos IA. Aplique as migrações pendentes no Supabase.');
+    const stripped = { ...updates };
+    for (const col of OPTIONAL_AI_COLS) delete stripped[col];
+    res = await run(stripped);
   }
   return res;
 }
@@ -114,15 +117,18 @@ router.post('/lote', auth, async (req, res) => {
 
       const { data: inserted, error: insErr } = await insertAtestado({
         fechamento_id,
-        funcionario_id:  funcionario_id || null,
-        data_emissao:    item.data_emissao   || null,
-        periodo_inicio:  item.periodo_inicio  || null,
-        periodo_fim:     item.periodo_fim     || null,
-        dias_afastados:  item.total_dias_afastados || 0,
-        medico:          item.medico          || null,
-        crm:             item.crm             || null,
-        cid:             item.cid             || null,
-        nome_extraido:   item.nome_paciente   || null,
+        funcionario_id:           funcionario_id || null,
+        data_emissao:             item.data_emissao             || null,
+        periodo_inicio:           item.periodo_inicio            || null,
+        periodo_fim:              item.periodo_fim               || null,
+        dias_afastados:           item.total_dias_afastados      || 0,
+        medico:                   item.medico                    || null,
+        crm:                      item.crm                       || null,
+        cid:                      item.cid                       || null,
+        nome_extraido:            item.nome_paciente             || null,
+        categoria_cid:            item.categoria_cid             || null,
+        interpretacao_contextual: item.interpretacao_contextual  || null,
+        risco_recorrencia:        item.risco_recorrencia         || null,
       });
 
       if (insErr) {

@@ -7,12 +7,32 @@
  * Works offline, mobile-friendly, and print-ready.
  */
 
-const { getCidInfo, buildClientCidScript } = require('./cid');
+const { getCidInfo, buildClientCidScript, getCategoria } = require('./cid');
 
 const MONTHS_PT = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ];
+
+const CATEGORY_ICONS = {
+  'Osteomuscular':    '🦴',
+  'Respiratório':     '🫁',
+  'Mental':           '🧠',
+  'Acidente/Trauma':  '🩹',
+  'Digestivo':        '🫄',
+  'Cardiovascular':   '❤️',
+  'Geniturinário':    '💧',
+  'Neurológico':      '⚡',
+  'Infeccioso':       '🦠',
+  'Endócrino':        '⚖️',
+  'Sensorial':        '👁️',
+  'Pele':             '🩺',
+  'Maternidade':      '🤱',
+  'Preventivo':       '✅',
+  'Sintomas gerais':  '🌡️',
+  'Oncológico':       '🎗️',
+  'Outro':            '🏥',
+};
 
 function formatBRL(value) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
@@ -34,12 +54,6 @@ function esc(str) {
     .replace(/"/g, '&quot;');
 }
 
-/**
- * Build a tiny SVG bar chart for consumo vs vales for one employee.
- * @param {number} consumo
- * @param {number} vales
- * @param {number} maxVal - the maximum value in the entire dataset (for scale)
- */
 function miniBarChart(consumo, vales, maxVal) {
   if (!maxVal) return '';
   const W = 60, H = 16, BAR_W = 20, GAP = 4, BASE = 2;
@@ -53,12 +67,330 @@ function miniBarChart(consumo, vales, maxVal) {
     + `</svg>`;
 }
 
+// ── Employee attention score ─────────────────────────────────────────────────
+function getScore(l) {
+  const dias = Number(l.dias_afastados) || 0;
+  const isRecurrent = (l.historicalAtestados || []).some(ha =>
+    (l.atestados || []).some(a => a.cid && a.cid === ha.cid)
+  );
+  const hasAltoRisco = (l.atestados || []).some(a => a.risco_recorrencia === 'alto');
+
+  if (dias >= 7 || hasAltoRisco) return { emoji: '🔴', label: 'Atenção', cls: 'score-red' };
+  if (dias >= 3 || isRecurrent)  return { emoji: '🟡', label: 'Observar', cls: 'score-yellow' };
+  return { emoji: '🟢', label: 'Normal', cls: 'score-green' };
+}
+
+// ── Attention panel ──────────────────────────────────────────────────────────
+function buildAttentionPanel(lancamentos, mesNome, ano) {
+  const alertas = [];
+  const positivos = [];
+
+  // High-absence employees
+  const altaAusencia = lancamentos.filter(l => (l.dias_afastados || 0) >= 7);
+  if (altaAusencia.length > 0) {
+    alertas.push(`⚠️ <strong>${altaAusencia.length} funcionário(s) com 7+ dias afastados</strong>: ${esc(altaAusencia.map(l => l.funcionario.nome.split(' ')[0]).join(', '))}`);
+  }
+
+  // CID clusters (same CID in 2+ employees)
+  const cidEmployees = {};
+  for (const l of lancamentos) {
+    for (const a of (l.atestados || [])) {
+      if (!a.cid) continue;
+      if (!cidEmployees[a.cid]) cidEmployees[a.cid] = new Set();
+      cidEmployees[a.cid].add(l.funcionario.nome.split(' ')[0]);
+    }
+  }
+  for (const [cid, names] of Object.entries(cidEmployees)) {
+    if (names.size >= 2) {
+      alertas.push(`🔴 <strong>Cluster: CID ${esc(cid)}</strong> afetou ${names.size} funcionários (${esc([...names].join(', '))}) — verifique se há fator ocupacional.`);
+    }
+  }
+
+  // Recurrences
+  for (const l of lancamentos) {
+    const currentCIDs = (l.atestados || []).map(a => a.cid).filter(Boolean);
+    const recurrent = currentCIDs.filter(cid =>
+      (l.historicalAtestados || []).some(ha => ha.cid === cid)
+    );
+    if (recurrent.length > 0) {
+      alertas.push(`🔁 <strong>${esc(l.funcionario.nome.split(' ')[0])}</strong>: CID <strong>${esc(recurrent.join(', '))}</strong> já apareceu em meses anteriores.`);
+    }
+  }
+
+  // High recurrence risk from AI
+  const altoRisco = [];
+  for (const l of lancamentos) {
+    for (const a of (l.atestados || [])) {
+      if (a.risco_recorrencia === 'alto') {
+        altoRisco.push(`${esc(l.funcionario.nome.split(' ')[0])} (CID ${esc(a.cid || '—')})`);
+      }
+    }
+  }
+  if (altoRisco.length > 0) {
+    alertas.push(`⚠️ Risco de recorrência <strong>alto</strong> identificado: ${altoRisco.join(', ')}`);
+  }
+
+  // Positive items
+  const semAbsencias = lancamentos.filter(l => (l.dias_afastados || 0) === 0 && (l.faltas || 0) === 0).length;
+  if (semAbsencias > 0) positivos.push(`✅ ${semAbsencias} funcionário(s) sem nenhuma falta ou afastamento no mês.`);
+  if (Object.values(cidEmployees).filter(s => s.size >= 2).length === 0) {
+    positivos.push(`✅ Nenhum cluster de doenças identificado este mês.`);
+  }
+
+  if (alertas.length === 0 && positivos.length === 0) return '';
+
+  return `
+<div class="no-print attention-panel">
+  <div class="attention-title">📋 O que merece atenção em ${esc(mesNome)}/${ano}</div>
+  <div class="attention-body">
+    ${alertas.length > 0 ? `<div class="attention-col">
+      <div class="attention-col-title" style="color:#b45309">Pontos de atenção</div>
+      ${alertas.map(a => `<div class="attention-item">${a}</div>`).join('')}
+    </div>` : ''}
+    ${positivos.length > 0 ? `<div class="attention-col">
+      <div class="attention-col-title" style="color:#166534">Pontos positivos</div>
+      ${positivos.map(p => `<div class="attention-pos">${esc(p)}</div>`).join('')}
+    </div>` : ''}
+  </div>
+</div>`;
+}
+
+// ── Ranking section ──────────────────────────────────────────────────────────
+function buildRankingSection(lancamentos) {
+  const withAbs = lancamentos
+    .filter(l => (l.dias_afastados || 0) > 0)
+    .sort((a, b) => (b.dias_afastados || 0) - (a.dias_afastados || 0))
+    .slice(0, 8);
+
+  if (withAbs.length === 0) return '';
+
+  const maxDays = withAbs[0].dias_afastados || 1;
+  const medals = ['🥇', '🥈', '🥉'];
+
+  const items = withAbs.map((l, i) => {
+    const pct = Math.round(((l.dias_afastados || 0) / maxDays) * 100);
+    const score = getScore(l);
+    return `<div class="rank-item">
+      <span class="rank-pos">${medals[i] || `${i + 1}º`}</span>
+      <span class="rank-name">${esc(l.funcionario.nome)}</span>
+      <div class="rank-bar-wrap"><div class="rank-bar" style="width:${pct}%"></div></div>
+      <span class="rank-days">${l.dias_afastados}d</span>
+      <span class="score-badge ${score.cls}">${score.emoji}</span>
+    </div>`;
+  }).join('');
+
+  return `
+<div class="no-print ranking-section">
+  <div class="section-title">🏆 Ranking de Afastamentos</div>
+  <div class="rank-list">${items}</div>
+</div>`;
+}
+
+// ── Health dashboard ─────────────────────────────────────────────────────────
+function buildHealthDashboard(lancamentos) {
+  const catMap = {};
+  for (const l of lancamentos) {
+    for (const a of (l.atestados || [])) {
+      const cat = a.categoria_cid || getCategoria(a.cid) || 'Outro';
+      if (!catMap[cat]) catMap[cat] = { days: 0, employees: new Set(), cids: new Set() };
+      catMap[cat].days += Number(a.dias_afastados) || 0;
+      catMap[cat].employees.add(l.funcionario.nome);
+      if (a.cid) catMap[cat].cids.add(a.cid);
+    }
+  }
+
+  if (Object.keys(catMap).length === 0) return '';
+
+  const sorted = Object.entries(catMap).sort((a, b) => b[1].days - a[1].days);
+  const maxDays = sorted[0][1].days || 1;
+
+  const cards = sorted.map(([cat, info]) => {
+    const icon = CATEGORY_ICONS[cat] || '🏥';
+    const pct = Math.round((info.days / maxDays) * 100);
+    return `<div class="dash-card">
+      <div class="dash-icon">${icon}</div>
+      <div class="dash-cat">${esc(cat)}</div>
+      <div class="dash-bar-wrap"><div class="dash-bar" style="width:${pct}%"></div></div>
+      <div class="dash-meta">${info.days}d · ${info.employees.size} func.</div>
+    </div>`;
+  }).join('');
+
+  // Score distribution
+  let verde = 0, amarelo = 0, vermelho = 0;
+  for (const l of lancamentos) {
+    const s = getScore(l).cls;
+    if (s === 'score-red') vermelho++;
+    else if (s === 'score-yellow') amarelo++;
+    else verde++;
+  }
+
+  return `
+<div class="no-print health-dashboard">
+  <div class="health-dashboard-grid">
+    <div>
+      <div class="section-title">🏥 Saúde Ocupacional — por Categoria</div>
+      <div class="dash-grid">${cards}</div>
+    </div>
+    <div>
+      <div class="section-title">📊 Índice de Atenção</div>
+      <div class="score-dist">
+        <div class="score-dist-item"><span class="score-big">🟢</span><span class="score-dist-num">${verde}</span><span class="score-dist-lbl">Normal</span></div>
+        <div class="score-dist-item"><span class="score-big">🟡</span><span class="score-dist-num">${amarelo}</span><span class="score-dist-lbl">Observar</span></div>
+        <div class="score-dist-item"><span class="score-big">🔴</span><span class="score-dist-num">${vermelho}</span><span class="score-dist-lbl">Atenção</span></div>
+      </div>
+      <p class="score-legend">🟢 Normal: sem afastamentos ou poucos dias<br>🟡 Observar: 3-6 dias ou CID recorrente<br>🔴 Atenção: 7+ dias ou risco alto identificado</p>
+    </div>
+  </div>
+</div>`;
+}
+
+// ── Absence timeline ─────────────────────────────────────────────────────────
+function buildTimelineSection(lancamentos, fechamento) {
+  const withAny = lancamentos.filter(l =>
+    (l.dias_afastados || 0) > 0 || (l.faltas || 0) > 0
+  );
+  if (withAny.length === 0) return '';
+
+  const daysInMonth = new Date(fechamento.ano, fechamento.mes, 0).getDate();
+
+  const rows = withAny.map(l => {
+    // Build a day-slot array for the month
+    const slots = Array(daysInMonth).fill('');
+
+    // Mark falta days
+    for (const d of (l.faltasDatas || [])) {
+      const day = parseInt(d.split('-')[2], 10) - 1;
+      if (day >= 0 && day < daysInMonth) slots[day] = 'falta';
+    }
+
+    // Mark atestado periods
+    for (const a of (l.atestados || [])) {
+      if (!a.periodo_inicio) continue;
+      const start = new Date(a.periodo_inicio + 'T12:00:00');
+      const end   = a.periodo_fim ? new Date(a.periodo_fim + 'T12:00:00') : start;
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        if (d.getMonth() + 1 === fechamento.mes && d.getFullYear() === fechamento.ano) {
+          const idx = d.getDate() - 1;
+          if (idx >= 0 && idx < daysInMonth) slots[idx] = 'atestado';
+        }
+      }
+    }
+
+    const slotHtml = slots.map((type, idx) => {
+      const cls = type === 'atestado' ? 'tl-atestado' : type === 'falta' ? 'tl-falta' : 'tl-empty';
+      return `<span class="tl-cell ${cls}" title="Dia ${idx + 1}"></span>`;
+    }).join('');
+
+    const score = getScore(l);
+
+    return `<div class="tl-row">
+      <span class="tl-name">${esc(l.funcionario.nome.split(' ')[0])}</span>
+      <span class="score-badge ${score.cls}" style="margin-right:4px">${score.emoji}</span>
+      <div class="tl-cells">${slotHtml}</div>
+    </div>`;
+  }).join('');
+
+  // Day headers
+  const headers = Array.from({ length: daysInMonth }, (_, i) =>
+    `<span class="tl-hdr">${i + 1}</span>`
+  ).join('');
+
+  return `
+<div class="no-print timeline-section">
+  <div class="section-title">📅 Linha do Tempo de Afastamentos — ${MONTHS_PT[fechamento.mes - 1]}/${fechamento.ano}</div>
+  <div class="tl-legend">
+    <span class="tl-cell tl-atestado" style="display:inline-block"></span> Atestado &nbsp;
+    <span class="tl-cell tl-falta" style="display:inline-block"></span> Falta &nbsp;
+    <span class="tl-cell tl-empty" style="display:inline-block"></span> Presente
+  </div>
+  <div class="tl-wrap">
+    <div class="tl-headers"><span class="tl-name"></span><span style="width:28px;display:inline-block"></span>${headers}</div>
+    ${rows}
+  </div>
+</div>`;
+}
+
+// ── Employee analysis cards ──────────────────────────────────────────────────
+function buildEmployeeAnalysis(lancamentos) {
+  const withData = lancamentos.filter(l =>
+    (l.dias_afastados || 0) > 0 || (l.atestados || []).length > 0
+  );
+  if (withData.length === 0) return '';
+
+  const cards = withData.map(l => {
+    const score = getScore(l);
+
+    // AI interpretation (best available across all atestados)
+    const interpretacoes = (l.atestados || [])
+      .map(a => a.interpretacao_contextual)
+      .filter(Boolean);
+    const interpretacao = interpretacoes[0] || null;
+
+    // Recurrence risk (worst across all atestados)
+    const riscos = (l.atestados || []).map(a => a.risco_recorrencia).filter(Boolean);
+    const risco = riscos.includes('alto') ? 'alto' : riscos.includes('médio') ? 'médio' : riscos[0] || null;
+
+    // Categories
+    const categorias = [...new Set((l.atestados || []).map(a =>
+      a.categoria_cid || getCategoria(a.cid) || null
+    ).filter(Boolean))];
+
+    // CIDs
+    const cids = [...new Set((l.atestados || []).map(a => a.cid).filter(Boolean))];
+
+    // Historical months
+    const histByMonth = {};
+    for (const ha of (l.historicalAtestados || [])) {
+      const key = ha.fechamentos
+        ? `${MONTHS_PT[(ha.fechamentos.mes || 1) - 1].slice(0, 3)}/${ha.fechamentos.ano}`
+        : '?';
+      if (!histByMonth[key]) histByMonth[key] = 0;
+      histByMonth[key] += Number(ha.dias_afastados) || 0;
+    }
+    const histHtml = Object.entries(histByMonth).slice(0, 6).map(([month, days]) =>
+      `<span class="hist-chip">${esc(month)}: ${days}d</span>`
+    ).join('');
+
+    // Recurrence check
+    const recurrentCIDs = cids.filter(cid =>
+      (l.historicalAtestados || []).some(ha => ha.cid === cid)
+    );
+
+    const ricoColor = risco === 'alto' ? '#ef4444' : risco === 'médio' ? '#f59e0b' : '#22c55e';
+    const ricoEmoji = risco === 'alto' ? '🔴' : risco === 'médio' ? '🟡' : '🟢';
+
+    return `<div class="emp-card">
+      <div class="emp-card-header">
+        <span class="score-badge ${score.cls} score-lg">${score.emoji} ${esc(score.label)}</span>
+        <span class="emp-name">${esc(l.funcionario.nome)}</span>
+        <span class="emp-funcao">${esc(l.funcionario.funcao)}</span>
+      </div>
+      <div class="emp-card-body">
+        <div class="emp-stat"><span class="emp-stat-n">${l.dias_afastados || 0}</span><span class="emp-stat-lbl">dias afastado(a)</span></div>
+        <div class="emp-stat"><span class="emp-stat-n">${l.faltas || 0}</span><span class="emp-stat-lbl">falta(s)</span></div>
+        ${cids.length > 0 ? `<div class="emp-cids">${cids.map(c => `<span class="cid-badge" onclick="showCIDModal('${esc(c)}',event)">${esc(c)}</span>`).join(' ')}</div>` : ''}
+        ${categorias.length > 0 ? `<div class="emp-cats">${categorias.map(cat => `<span class="cat-chip">${CATEGORY_ICONS[cat] || '🏥'} ${esc(cat)}</span>`).join('')}</div>` : ''}
+        ${interpretacao ? `<div class="emp-interp">"${esc(interpretacao)}"</div>` : ''}
+        ${risco ? `<div class="emp-risco" style="color:${ricoColor}">${ricoEmoji} Risco de recorrência: <strong>${risco}</strong></div>` : ''}
+        ${recurrentCIDs.length > 0 ? `<div class="emp-recurrence">🔁 CID recorrente: ${recurrentCIDs.map(c => `<strong>${esc(c)}</strong>`).join(', ')}</div>` : ''}
+        ${histHtml ? `<div class="emp-hist-label">Histórico:</div><div class="emp-hist">${histHtml}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+<div class="no-print emp-analysis-section">
+  <div class="section-title">👤 Análise por Funcionário</div>
+  <div class="emp-grid">${cards}</div>
+</div>`;
+}
+
+// ── Main function ─────────────────────────────────────────────────────────────
+
 /**
- * Generate a complete standalone HTML report.
- *
- * @param {object}   fechamento   - { mes, ano, status, aprovado_por, aprovado_em }
- * @param {object[]} lancamentos  - employee launch data
- * @param {object[]} pendencias   - pending items
+ * @param {object}   fechamento  - { mes, ano, status, aprovado_por, aprovado_em }
+ * @param {object[]} lancamentos - employee launch data
+ * @param {object[]} pendencias  - pending items
  * @returns {string} HTML string
  */
 function gerarHTML(fechamento, lancamentos, pendencias) {
@@ -70,7 +402,6 @@ function gerarHTML(fechamento, lancamentos, pendencias) {
     ? `APROVADO${fechamento.aprovado_por ? ' — ' + esc(fechamento.aprovado_por) : ''}`
     : 'EM ANDAMENTO';
 
-  // Rich CID lookup script embedded in the standalone file (offline-ready).
   const cidClientScript = buildClientCidScript();
 
   const totConsumo = lancamentos.reduce((s, l) => s + (Number(l.consumo) || 0), 0);
@@ -79,15 +410,12 @@ function gerarHTML(fechamento, lancamentos, pendencias) {
   const totDSR     = lancamentos.reduce((s, l) => s + (Number(l.dsr)     || 0), 0);
   const totDesc    = lancamentos.reduce((s, l) => s + (Number(l.dias_descontados) || 0), 0);
   const totAfas    = lancamentos.reduce((s, l) => s + (Number(l.dias_afastados)   || 0), 0);
-  // Max for mini bar charts
-  const maxVal = Math.max(...lancamentos.map(l => Math.max(Number(l.consumo) || 0, Number(l.vales) || 0)), 1);
+  const maxVal     = Math.max(...lancamentos.map(l => Math.max(Number(l.consumo) || 0, Number(l.vales) || 0)), 1);
+  const roles      = [...new Set(lancamentos.map(l => l.funcionario.funcao))].sort();
 
-  // Unique roles for filter buttons
-  const roles = [...new Set(lancamentos.map(l => l.funcionario.funcao))].sort();
-
-  // ── Row generation ─────────────────────────────────────────────────────────
-  const rows = lancamentos.map((l, idx) => {
-    const hasFalta   = (l.faltas   || 0) > 0;
+  // ── Row generation ──────────────────────────────────────────────────────────
+  const rows = lancamentos.map((l) => {
+    const hasFalta    = (l.faltas   || 0) > 0;
     const hasAtestado = (l.dias_afastados || 0) > 0;
     const chart = miniBarChart(Number(l.consumo) || 0, Number(l.vales) || 0, maxVal);
 
@@ -102,10 +430,10 @@ function gerarHTML(fechamento, lancamentos, pendencias) {
       return `<div class="cert-item">${cidBadge} ${period ? `<span>${period}</span>` : ''} <span class="cert-days">${a.dias_afastados}d</span> ${a.medico ? `<span class="cert-doctor">Dr. ${esc(a.medico)}</span>` : ''}</div>`;
     }).join('');
 
-    // Historical recurrence check
-    const currentCIDs = (l.atestados || []).map(a => a.cid).filter(Boolean);
-    const histAtestados = l.historicalAtestados || [];
-    const recurrenceCIDs = currentCIDs.filter(cid => histAtestados.some(ha => ha.cid === cid));
+    const currentCIDs    = (l.atestados || []).map(a => a.cid).filter(Boolean);
+    const recurrenceCIDs = currentCIDs.filter(cid =>
+      (l.historicalAtestados || []).some(ha => ha.cid === cid)
+    );
     const recurrenceHtml = recurrenceCIDs.length > 0
       ? `<div class="recurrence-warning">⚠️ Recorrência: CID ${recurrenceCIDs.join(', ')} já apareceu em meses anteriores</div>`
       : '';
@@ -143,7 +471,7 @@ function gerarHTML(fechamento, lancamentos, pendencias) {
 </tr>`;
   }).join('\n');
 
-  // ── Embed data for JS ──────────────────────────────────────────────────────
+  // ── Script data ─────────────────────────────────────────────────────────────
   const scriptData = `
 const LANCAMENTOS = ${JSON.stringify(lancamentos.map(l => ({
     id: l.funcionario_id || l.funcionario.id,
@@ -158,10 +486,9 @@ const LANCAMENTOS = ${JSON.stringify(lancamentos.map(l => ({
   })))};
 `;
 
-  // ── CID summary section ────────────────────────────────────────────────────
+  // ── Atestados summary table ──────────────────────────────────────────────────
   const atestadosList = lancamentos.filter(l => (l.atestados || []).length > 0);
   const cidSummaryHtml = atestadosList.length === 0 ? '' : (() => {
-    // Per-employee rows
     const cidRows = atestadosList.map(l => {
       const cids = (l.atestados || []).map(a => a.cid).filter(Boolean);
       const cidBadges = cids.length > 0
@@ -198,42 +525,37 @@ const LANCAMENTOS = ${JSON.stringify(lancamentos.map(l => ({
 </div>`;
   })();
 
-  // ── CID Intelligence section ──────────────────────────────────────────────
-  // Aggregate all CIDs from current month across all employees
-  const cidFreqMap = {};   // CID → { count, employees: Set, totalDays, historicalCount }
+  // ── CID Intelligence section ─────────────────────────────────────────────────
+  const cidFreqMap = {};
   for (const l of lancamentos) {
     for (const a of (l.atestados || [])) {
       if (!a.cid) continue;
       const cid = a.cid.toUpperCase().trim();
-      if (!cidFreqMap[cid]) cidFreqMap[cid] = { count: 0, employees: new Set(), totalDays: 0, historicalCount: 0 };
+      if (!cidFreqMap[cid]) cidFreqMap[cid] = { count: 0, employees: new Set(), totalDays: 0, historicalCount: 0, categoria: a.categoria_cid || getCategoria(a.cid) };
       cidFreqMap[cid].count++;
       cidFreqMap[cid].employees.add(l.funcionario.nome);
       cidFreqMap[cid].totalDays += Number(a.dias_afastados) || 0;
     }
-    // Count historical occurrences
     for (const ha of (l.historicalAtestados || [])) {
       if (!ha.cid) continue;
       const cid = ha.cid.toUpperCase().trim();
       if (cidFreqMap[cid]) cidFreqMap[cid].historicalCount++;
     }
   }
-
-  // Sort by totalDays desc, then count desc
   const cidRanked = Object.entries(cidFreqMap).sort((a, b) =>
     (b[1].totalDays - a[1].totalDays) || (b[1].count - a[1].count)
   );
 
   const cidIntelligenceHtml = cidRanked.length === 0 ? '' : (() => {
-    const rows = cidRanked.map(([cid, info]) => {
-      const isCluster = info.employees.size >= 2;
+    const ciRows = cidRanked.map(([cid, info]) => {
+      const isCluster  = info.employees.size >= 2;
       const isRecurrent = info.historicalCount > 0;
-      const empList = [...info.employees].join(', ');
-      // Rich description: technical name + simple name, or a clear
-      // "Não encontrada" when the code isn't catalogued (never blank).
-      const cidInfo = getCidInfo(cid);
-      const desc = cidInfo.encontrada
+      const empList    = [...info.employees].join(', ');
+      const cidInfo    = getCidInfo(cid);
+      const desc       = cidInfo.encontrada
         ? `${cidInfo.descricao} — ${cidInfo.simples}`
         : 'Não encontrada';
+      const catIcon    = CATEGORY_ICONS[info.categoria] || '🏥';
       return `<tr${isCluster ? ' style="background:#fff7ed"' : ''}>
         <td style="font-weight:700;white-space:nowrap">
           ${esc(cid)}
@@ -241,6 +563,7 @@ const LANCAMENTOS = ${JSON.stringify(lancamentos.map(l => ({
           ${isRecurrent ? '<span style="margin-left:4px;background:#dc2626;color:#fff;font-size:10px;padding:1px 5px;border-radius:8px">RECORRENTE</span>' : ''}
         </td>
         <td style="font-size:12px;color:#374151">${esc(desc)}</td>
+        <td style="font-size:11px;color:#6b7280">${catIcon} ${esc(info.categoria)}</td>
         <td style="text-align:center;font-weight:700">${info.count}</td>
         <td style="text-align:center;font-weight:700;color:#2563eb">${info.totalDays}</td>
         <td style="font-size:11px;color:#6b7280">${esc(empList)}</td>
@@ -265,19 +588,27 @@ const LANCAMENTOS = ${JSON.stringify(lancamentos.map(l => ({
     <thead><tr style="background:#1d4ed8;color:#fff">
       <th style="padding:7px 10px;text-align:left;white-space:nowrap">CID</th>
       <th style="padding:7px 10px;text-align:left">Doença / Condição</th>
+      <th style="padding:7px 10px;text-align:left">Categoria</th>
       <th style="padding:7px 10px;text-align:center">Ocorr.</th>
       <th style="padding:7px 10px;text-align:center">Dias perdidos</th>
       <th style="padding:7px 10px;text-align:left">Funcionário(s)</th>
       <th style="padding:7px 10px;text-align:center;white-space:nowrap">Histórico</th>
     </tr></thead>
-    <tbody>${rows}</tbody>
+    <tbody>${ciRows}</tbody>
   </table>
   </div>
   <p style="font-size:10px;color:#9ca3af;margin-top:8px">CLUSTER = mesmo CID em 2+ funcionários no mesmo mês. RECORRENTE = CID já apareceu em meses anteriores.</p>
 </div>`;
   })();
 
-  // ── HTML ───────────────────────────────────────────────────────────────────
+  // ── Build new sections ───────────────────────────────────────────────────────
+  const attentionPanelHtml   = buildAttentionPanel(lancamentos, mesNome, fechamento.ano);
+  const rankingSectionHtml   = buildRankingSection(lancamentos);
+  const healthDashboardHtml  = buildHealthDashboard(lancamentos);
+  const timelineSectionHtml  = buildTimelineSection(lancamentos, fechamento);
+  const empAnalysisHtml      = buildEmployeeAnalysis(lancamentos);
+
+  // ── HTML ─────────────────────────────────────────────────────────────────────
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -301,9 +632,6 @@ a{color:inherit}
 .badge-aprovado{background:#1C7A3A;color:#fff}
 .badge-em_andamento{background:#CC6600;color:#fff}
 
-/* ── Alert banner ──────────────────────────────────────────────── */
-.alert-banner{background:#fff1f0;border:1px solid #ffa39e;border-radius:8px;padding:10px 16px;margin-bottom:16px;color:#a8071a;font-weight:500;display:flex;align-items:center;gap:8px}
-
 /* ── Summary cards ─────────────────────────────────────────────── */
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px}
 .card{background:#fff;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,.08);border-left:4px solid #9a7520}
@@ -312,6 +640,15 @@ a{color:inherit}
 .card.card-dsr{border-color:#dc2626}
 .card-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#78716c}
 .card-value{font-size:22px;font-weight:700;color:#1c1917;margin-top:2px}
+
+/* ── Attention panel ───────────────────────────────────────────── */
+.attention-panel{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:20px;border-left:4px solid #b45309}
+.attention-title{font-size:15px;font-weight:700;color:#1c1917;margin-bottom:12px}
+.attention-body{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.attention-col-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.attention-item{font-size:12px;padding:5px 8px;background:#fffbeb;border-radius:6px;margin-bottom:4px;line-height:1.5;border-left:3px solid #f59e0b}
+.attention-pos{font-size:12px;padding:5px 8px;background:#f0fdf4;border-radius:6px;margin-bottom:4px;border-left:3px solid #22c55e}
+@media(max-width:640px){.attention-body{grid-template-columns:1fr}}
 
 /* ── Controls ──────────────────────────────────────────────────── */
 .controls{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;align-items:center}
@@ -360,6 +697,102 @@ tbody tr.data-row:nth-child(4n+3) td{background:#fffdf9}
 .badge-aberta{background:#fff1f0;color:#a8071a;border:1px solid #ffa39e}
 .badge-resolvida{background:#f0fdf4;color:#1C7A3A;border:1px solid #86efac}
 
+/* ── Score badges ──────────────────────────────────────────────── */
+.score-badge{font-size:11px;padding:2px 7px;border-radius:10px;font-weight:600;white-space:nowrap}
+.score-green{background:#f0fdf4;color:#166534}
+.score-yellow{background:#fffbeb;color:#92400e}
+.score-red{background:#fff1f0;color:#991b1b}
+.score-lg{font-size:12px;padding:3px 9px}
+
+/* ── Ranking ───────────────────────────────────────────────────── */
+.ranking-section{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:20px}
+.rank-list{display:flex;flex-direction:column;gap:8px}
+.rank-item{display:flex;align-items:center;gap:10px;font-size:13px}
+.rank-pos{width:28px;text-align:center;font-size:16px;flex-shrink:0}
+.rank-name{width:180px;font-weight:500;flex-shrink:0}
+.rank-bar-wrap{flex:1;background:#f5f1eb;border-radius:6px;height:10px;overflow:hidden}
+.rank-bar{height:10px;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:6px;transition:width .3s}
+.rank-days{width:36px;text-align:right;font-weight:700;color:#2563eb;flex-shrink:0}
+
+/* ── Health Dashboard ──────────────────────────────────────────── */
+.health-dashboard{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:20px}
+.health-dashboard-grid{display:grid;grid-template-columns:2fr 1fr;gap:24px}
+@media(max-width:640px){.health-dashboard-grid{grid-template-columns:1fr}}
+.dash-grid{display:flex;flex-direction:column;gap:8px}
+.dash-card{display:flex;align-items:center;gap:10px;font-size:12px}
+.dash-icon{width:24px;text-align:center;flex-shrink:0;font-size:16px}
+.dash-cat{width:140px;font-weight:500;flex-shrink:0}
+.dash-bar-wrap{flex:1;background:#f5f1eb;border-radius:4px;height:8px;overflow:hidden}
+.dash-bar{height:8px;background:linear-gradient(90deg,#9a7520,#c9a96e);border-radius:4px}
+.dash-meta{width:80px;text-align:right;color:#78716c;flex-shrink:0}
+.score-dist{display:flex;gap:16px;justify-content:center;padding:16px 0}
+.score-dist-item{display:flex;flex-direction:column;align-items:center;gap:4px}
+.score-big{font-size:28px}
+.score-dist-num{font-size:24px;font-weight:700}
+.score-dist-lbl{font-size:11px;color:#78716c}
+.score-legend{font-size:11px;color:#78716c;line-height:1.8;margin-top:8px}
+
+/* ── Timeline ──────────────────────────────────────────────────── */
+.timeline-section{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:20px}
+.tl-legend{font-size:11px;color:#78716c;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.tl-wrap{overflow-x:auto}
+.tl-headers,.tl-row{display:flex;align-items:center;gap:2px;margin-bottom:3px;min-width:max-content}
+.tl-name{width:110px;font-size:12px;font-weight:500;flex-shrink:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tl-hdr{width:14px;text-align:center;font-size:9px;color:#9ca3af;flex-shrink:0}
+.tl-cells{display:flex;gap:2px}
+.tl-cell{display:inline-block;width:14px;height:14px;border-radius:3px;flex-shrink:0}
+.tl-empty{background:#f0ece6}
+.tl-falta{background:#f59e0b}
+.tl-atestado{background:#2563eb}
+
+/* ── Employee analysis cards ───────────────────────────────────── */
+.emp-analysis-section{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:20px}
+.emp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.emp-card{border:1px solid #e7e0d8;border-radius:10px;padding:14px;background:#fafaf8}
+.emp-card-header{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px;border-bottom:1px solid #f0ece6;padding-bottom:8px}
+.emp-name{font-weight:600;font-size:13px;flex:1}
+.emp-funcao{font-size:11px;color:#78716c;width:100%}
+.emp-card-body{display:flex;flex-direction:column;gap:7px;font-size:12px}
+.emp-stat{display:inline-flex;align-items:baseline;gap:4px;margin-right:12px}
+.emp-stat-n{font-size:18px;font-weight:700;color:#1d4ed8}
+.emp-stat-lbl{font-size:11px;color:#78716c}
+.emp-cids{display:flex;flex-wrap:wrap;gap:4px}
+.emp-cats{display:flex;flex-wrap:wrap;gap:4px}
+.cat-chip{display:inline-block;padding:2px 7px;background:#f5f1eb;border-radius:10px;font-size:11px;font-weight:500;color:#44403c}
+.emp-interp{font-size:12px;color:#44403c;font-style:italic;background:#fffbeb;border-radius:6px;padding:6px 8px;line-height:1.5;border-left:3px solid #f59e0b}
+.emp-risco{font-size:12px;font-weight:500}
+.emp-recurrence{font-size:12px;color:#92400e;background:#fffbeb;border-radius:6px;padding:4px 8px}
+.emp-hist-label{font-size:11px;color:#78716c;font-weight:600;margin-top:2px}
+.emp-hist{display:flex;flex-wrap:wrap;gap:4px}
+.hist-chip{display:inline-block;padding:2px 7px;background:#eff6ff;border-radius:10px;font-size:11px;color:#1d4ed8}
+
+/* ── Cert / atestados ──────────────────────────────────────────── */
+.cid-badge{display:inline-block;padding:2px 7px;border-radius:12px;font-size:11px;font-weight:700;background:#1e3a5f;color:#93c5fd;border:1px solid #2563eb;cursor:pointer;transition:background .15s}
+.cid-badge:hover{background:#2563eb;color:#fff}
+.cert-item{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:2px 0;font-size:12px}
+.cert-days{color:#2563eb;font-weight:600}
+.cert-doctor{color:#78716c;font-size:11px}
+.recurrence-warning{margin-top:4px;padding:4px 8px;background:#fffbeb;border-radius:4px;font-size:11px;color:#92400e}
+.recurrence-tag{padding:1px 5px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:700}
+.recurrence-row td{background:#fffbeb!important}
+.atestados-section{margin-bottom:20px}
+
+/* ── CID Modal ─────────────────────────────────────────────────── */
+#cidModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px}
+#cidModal.hidden{display:none}
+#cidModalBox{background:#fff;border-radius:12px;padding:20px 24px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+#cidModalCode{font-size:22px;font-weight:800;color:#1e3a5f;margin-bottom:10px}
+#cidModalBody{margin-bottom:16px}
+.cid-row{display:flex;gap:10px;padding:4px 0;font-size:14px}
+.cid-k{width:120px;min-width:120px;color:#6b7280;font-weight:600}
+.cid-v{color:#1c1917;flex:1}
+.cid-msg{margin-top:8px;font-size:13px;color:#b45309;font-style:italic}
+#cidModalClose{padding:6px 18px;border-radius:8px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-weight:600}
+#cidModalClose:hover{background:#2563eb}
+.cid-sev-alto{color:#dc2626}
+.cid-sev-medio{color:#d97706}
+.cid-sev-baixo{color:#16a34a}
+
 /* ── Footer ────────────────────────────────────────────────────── */
 .report-footer{text-align:center;font-size:11px;color:#a8998a;margin-top:24px;padding-bottom:24px}
 
@@ -375,34 +808,14 @@ tbody tr.data-row:nth-child(4n+3) td{background:#fffdf9}
   .cards{display:none}
 }
 
-.cid-badge{display:inline-block;padding:2px 7px;border-radius:12px;font-size:11px;font-weight:700;background:#1e3a5f;color:#93c5fd;border:1px solid #2563eb;cursor:pointer;transition:background .15s}
-.cid-badge:hover{background:#2563eb;color:#fff}
-.cert-item{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:2px 0;font-size:12px}
-.cert-days{color:#2563eb;font-weight:600}
-.cert-doctor{color:#78716c;font-size:11px}
-.recurrence-warning{margin-top:4px;padding:4px 8px;background:#fffbeb;border-radius:4px;font-size:11px;color:#92400e}
-.recurrence-tag{padding:1px 5px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:700}
-.recurrence-row td{background:#fffbeb!important}
-.atestados-section{margin-bottom:20px}
-/* CID Modal */
-#cidModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px}
-#cidModal.hidden{display:none}
-#cidModalBox{background:#fff;border-radius:12px;padding:20px 24px;max-width:360px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)}
-#cidModalCode{font-size:22px;font-weight:800;color:#1e3a5f;margin-bottom:10px}
-#cidModalBody{margin-bottom:16px}
-.cid-row{display:flex;gap:10px;padding:4px 0;font-size:14px}
-.cid-k{width:96px;min-width:96px;color:#6b7280;font-weight:600}
-.cid-v{color:#1c1917;flex:1}
-.cid-msg{margin-top:8px;font-size:13px;color:#b45309;font-style:italic}
-#cidModalClose{padding:6px 18px;border-radius:8px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-weight:600}
-#cidModalClose:hover{background:#2563eb}
-
 /* ── Responsive ────────────────────────────────────────────────── */
 @media(max-width:640px){
   .cards{grid-template-columns:1fr 1fr}
   .detail-grid{grid-template-columns:1fr}
   .report-header h1{font-size:18px}
   .card-value{font-size:18px}
+  .rank-name{width:120px}
+  .emp-grid{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -454,6 +867,8 @@ tbody tr.data-row:nth-child(4n+3) td{background:#fffdf9}
   </div>
 </div>
 
+${attentionPanelHtml}
+
 <!-- Controls -->
 <div class="controls no-print">
   <input class="search-input" type="text" id="searchInput" placeholder="Buscar funcionário…" oninput="applyFilters()">
@@ -496,6 +911,10 @@ ${rows}
 </table>
 </div>
 
+${rankingSectionHtml}
+${healthDashboardHtml}
+${timelineSectionHtml}
+${empAnalysisHtml}
 ${cidSummaryHtml}
 
 <!-- CID Modal -->
@@ -527,7 +946,6 @@ let sortDir = 1;
 function setFilter(filter) {
   currentFilter = filter;
   document.querySelectorAll('.controls .btn').forEach(b => b.classList.remove('active'));
-  // Mark active btn
   applyFilters();
 }
 
@@ -537,9 +955,7 @@ function applyFilters() {
   rows.forEach(row => {
     const detail = row.nextElementSibling;
     let show = true;
-    // Name search
     if (search && !row.dataset.nome.includes(search)) show = false;
-    // Function filter
     if (currentFilter.startsWith('funcao:')) {
       const funcao = currentFilter.slice(7);
       if (row.dataset.funcao !== funcao) show = false;
@@ -564,14 +980,12 @@ function sortTable(colIdx) {
   if (sortCol === colIdx) sortDir *= -1;
   else { sortCol = colIdx; sortDir = 1; }
 
-  // Update header indicators
   document.querySelectorAll('thead th').forEach((th, i) => {
     th.classList.remove('sorted-asc','sorted-desc');
     if (i === colIdx) th.classList.add(sortDir === 1 ? 'sorted-asc' : 'sorted-desc');
   });
 
   const tbody = document.getElementById('tableBody');
-  // Collect data-row + its immediately following detail-row as pairs
   const pairs = [];
   const allRows = [...tbody.querySelectorAll('tr')];
   for (let i = 0; i < allRows.length; i++) {
@@ -588,9 +1002,7 @@ function sortTable(colIdx) {
     return av.localeCompare(bv, 'pt') * sortDir;
   });
 
-  // Keep totals row
   const totalsRow = tbody.querySelector('.totals-row');
-  // Remove and re-insert
   pairs.forEach(([dr, detR]) => {
     tbody.insertBefore(dr, totalsRow);
     if (detR) tbody.insertBefore(detR, totalsRow);
@@ -611,13 +1023,13 @@ function copiarResumo() {
     'ARAÇÁ GRILL — RESUMO ${esc(titulo)}',
     'Gerado em: ${esc(geradoEm)}',
     '',
-    'Consumo Total:         ${formatBRL(totConsumo)}',
-    'Vales Total:           ${formatBRL(totVales)}',
-    'Total Faltas:          ${totFaltas}',
-    'Total DSR:             ${totDSR}',
-    'Total Dias Descontados:${totDesc}',
-    'Total Dias Afastados:  ${totAfas}',
-    'Funcionários:          ${lancamentos.length}',
+    'Consumo Total:          ${formatBRL(totConsumo)}',
+    'Vales Total:            ${formatBRL(totVales)}',
+    'Total Faltas:           ${totFaltas}',
+    'Total DSR:              ${totDSR}',
+    'Total Dias Descontados: ${totDesc}',
+    'Total Dias Afastados:   ${totAfas}',
+    'Funcionários:           ${lancamentos.length}',
   ];
   const text = lines.join('\\n');
   if (navigator.clipboard) {
@@ -633,21 +1045,26 @@ function copiarResumo() {
   }
 }
 
-
-// ── CID Modal ────────────────────────────────────────────────────
+// ── CID Modal ─────────────────────────────────────────────────────
 function cidEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function showCIDModal(code, event) {
   event && event.stopPropagation();
   var info = getCidInfo(code);
+  var cat  = getCategoriaCid(code);
+  var sev  = getSeveridadeCid(code);
   document.getElementById('cidModalCode').textContent = 'CID ' + (info.cid || code);
   var body = document.getElementById('cidModalBody');
+  var sevColor = sev.nivel === 'alto' ? '#dc2626' : sev.nivel === 'médio' ? '#d97706' : '#16a34a';
   if (info.encontrada) {
     body.innerHTML =
       '<div class="cid-row"><span class="cid-k">Nome técnico</span><span class="cid-v">' + cidEsc(info.descricao) + '</span></div>' +
       '<div class="cid-row"><span class="cid-k">Nome simples</span><span class="cid-v">' + cidEsc(info.simples) + '</span></div>' +
-      '<div class="cid-row"><span class="cid-k">Pode indicar</span><span class="cid-v">' + cidEsc(info.explica) + '</span></div>';
+      '<div class="cid-row"><span class="cid-k">Pode indicar</span><span class="cid-v">' + cidEsc(info.explica) + '</span></div>' +
+      '<div class="cid-row"><span class="cid-k">Categoria</span><span class="cid-v">' + cidEsc(cat) + '</span></div>' +
+      '<div class="cid-row"><span class="cid-k">Afastamento</span><span class="cid-v" style="color:' + sevColor + '">' + cidEsc(sev.text) + '</span></div>';
   } else {
     body.innerHTML =
+      '<div class="cid-row"><span class="cid-k">Categoria</span><span class="cid-v">' + cidEsc(cat) + '</span></div>' +
       '<div class="cid-row"><span class="cid-k">Descrição</span><span class="cid-v">Não encontrada</span></div>' +
       '<div class="cid-msg">Não foi possível localizar a descrição deste CID.</div>';
   }
