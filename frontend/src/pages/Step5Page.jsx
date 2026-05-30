@@ -11,33 +11,102 @@ import { formatDate } from '../utils/format'
 // ---------------------------------------------------------------------------
 const CHATGPT_PROMPT = `Você é um assistente especializado em leitura de atestados médicos brasileiros.
 
-Analise as imagens dos atestados que vou enviar e extraia as informações de CADA UM.
+Analise as imagens que vou enviar e extraia as informações de CADA documento.
 
-REGRAS OBRIGATÓRIAS:
+━━━ TIPOS DE DOCUMENTO ━━━
+
+1. ATESTADO MÉDICO (afastamento): documento que libera o funcionário por doença/lesão por um ou mais dias.
+2. DECLARAÇÃO DE COMPARECIMENTO: documento que comprova apenas que o funcionário esteve presente na unidade de saúde em determinado dia — NÃO é afastamento de múltiplos dias.
+   → Para declaração de comparecimento: total_dias_afastados = 1, periodo_inicio = data_emissao, periodo_fim = data_emissao.
+
+━━━ REGRAS SOBRE PERÍODO E DIAS ━━━
+
+- Se o documento diz "X dias a partir desta data" (ou "a partir de DD/MM/YYYY"):
+  → periodo_inicio = data do início informada (ou data_emissao se disser "desta data")
+  → periodo_fim = periodo_inicio + (X - 1) dias
+  → total_dias_afastados = X
+
+- Se o documento menciona "pelo turno [Noturno / Vespertino / Matutino]" sem especificar quantidade de dias:
+  → total_dias_afastados = 1, periodo_inicio = data_emissao, periodo_fim = data_emissao
+
+- Se já existem periodo_inicio E periodo_fim explícitos no documento, calcule total_dias_afastados = diferença em dias + 1.
+
+- NUNCA deixe periodo_fim como null se você conseguir calculá-lo a partir de periodo_inicio + total_dias_afastados.
+
+━━━ OUTRAS REGRAS ━━━
+
 - NUNCA invente dados. Campo não visível ou ilegível = null.
 - Datas no formato YYYY-MM-DD.
-- total_dias_afastados deve ser um número inteiro.
-- Se o atestado informar apenas quantidade de dias sem as datas exatas, preencha total_dias_afastados e deixe periodo_inicio e periodo_fim como null.
+- total_dias_afastados deve ser um número inteiro (nunca string).
+- crm: somente os dígitos (remova "CRM", "CRM-SP", "SP", traços, espaços).
+- cid: código CID-10 como está no documento (ex: M796, J11, M54.5). Se não houver CID = null.
+- nome_paciente: nome completo como escrito no documento.
+
+━━━ FORMATO DE RESPOSTA ━━━
 
 Responda APENAS com um bloco de código JSON, sem nenhum texto antes ou depois.
-Se for UM atestado → retorne um único objeto JSON.
-Se forem MÚLTIPLOS atestados → retorne um array JSON com um objeto por atestado.
+Se for UM documento → retorne um único objeto JSON.
+Se forem MÚLTIPLOS documentos → retorne um array JSON com um objeto por documento.
 
-Formato obrigatório:
 \`\`\`json
 {
-  "nome_paciente": "nome completo do paciente ou null",
+  "nome_paciente": "nome completo ou null",
   "data_emissao": "YYYY-MM-DD ou null",
   "periodo_inicio": "YYYY-MM-DD ou null",
   "periodo_fim": "YYYY-MM-DD ou null",
   "total_dias_afastados": número inteiro ou null,
   "medico": "nome completo do médico ou null",
   "crm": "somente os dígitos do CRM ou null",
-  "cid": "código CID-10 (ex: J11, M54) ou null"
+  "cid": "código CID-10 como está no documento ou null"
 }
 \`\`\`
 
 Envie agora as imagens dos atestados.`
+
+// ---------------------------------------------------------------------------
+// Post-process each parsed atestado to fill in derivable fields
+// ---------------------------------------------------------------------------
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T12:00:00Z')
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+function normalizeAtestado(item) {
+  const out = { ...item }
+
+  // If periodo_inicio is null but we know it starts on data_emissao (most common case)
+  // Only infer when total_dias_afastados is present AND periodo_fim is also null
+  // (if the AI explicitly left both null it means the doc only said "X days")
+  // We leave this decision to post-processing below.
+
+  // Calculate periodo_fim from periodo_inicio + total_dias (if fim is missing)
+  if (out.periodo_inicio && out.total_dias_afastados > 0 && !out.periodo_fim) {
+    out.periodo_fim = addDays(out.periodo_inicio, out.total_dias_afastados - 1)
+    out._derived_fim = true
+  }
+
+  // Calculate periodo_inicio/fim from data_emissao + total_dias when inicio is also missing
+  // (covers "X dias a partir desta data" where AI only filled total_dias_afastados)
+  if (!out.periodo_inicio && !out.periodo_fim && out.total_dias_afastados > 0 && out.data_emissao) {
+    out.periodo_inicio = out.data_emissao
+    out.periodo_fim = addDays(out.data_emissao, out.total_dias_afastados - 1)
+    out._derived_periodo = true
+  }
+
+  // Normalize CID: uppercase, trim spaces
+  if (out.cid) out.cid = String(out.cid).toUpperCase().trim()
+
+  // Flag items that need attention
+  const warnings = []
+  if (!out.nome_paciente) warnings.push('Nome do paciente não identificado')
+  if (out.total_dias_afastados === null || out.total_dias_afastados === undefined)
+    warnings.push('Dias afastados não identificados — revise')
+  if (!out.medico && !out.crm) warnings.push('Médico/CRM não identificado')
+  out._warnings = warnings
+
+  return out
+}
 
 // ---------------------------------------------------------------------------
 // Parse AI response (markdown with JSON code block or raw JSON)
@@ -48,7 +117,8 @@ function parseAIResponse(text) {
   if (blockMatch) {
     try {
       const parsed = JSON.parse(blockMatch[1].trim())
-      return { ok: true, data: Array.isArray(parsed) ? parsed : [parsed] }
+      const arr = Array.isArray(parsed) ? parsed : [parsed]
+      return { ok: true, data: arr.map(normalizeAtestado) }
     } catch (e) {
       return { ok: false, error: 'JSON inválido dentro do bloco de código: ' + e.message }
     }
@@ -58,7 +128,8 @@ function parseAIResponse(text) {
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
       const parsed = JSON.parse(trimmed)
-      return { ok: true, data: Array.isArray(parsed) ? parsed : [parsed] }
+      const arr = Array.isArray(parsed) ? parsed : [parsed]
+      return { ok: true, data: arr.map(normalizeAtestado) }
     } catch (e) {
       return { ok: false, error: 'JSON inválido: ' + e.message }
     }
@@ -386,35 +457,107 @@ export default function Step5Page() {
             {/* Preview */}
             {preview && (
               <div>
-                <p className="text-sm font-semibold text-stone-200 mb-3">
-                  {preview.length} atestado(s) encontrado(s) — revise e ajuste o funcionário antes de salvar:
+                <p className="text-sm font-semibold text-stone-200 mb-1">
+                  {preview.length} atestado(s) encontrado(s)
                 </p>
+                <p className="text-xs text-stone-500 mb-3">Revise e corrija os campos antes de salvar. Campos em vermelho precisam de atenção.</p>
                 <div className="space-y-3">
-                  {preview.map((item, idx) => (
-                    <div key={idx} className="rounded-lg border p-4" style={{ backgroundColor: '#1e1a17', borderColor: '#3c3330' }}>
-                      <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm mb-3">
-                        <div><span className="text-stone-500 text-xs">Paciente:</span><br /><span className="text-stone-200">{item.nome_paciente || '—'}</span></div>
-                        <div><span className="text-stone-500 text-xs">Dias Afastados:</span><br /><span className="text-blue-400 font-semibold">{item.total_dias_afastados ?? '—'}</span></div>
-                        <div><span className="text-stone-500 text-xs">Período:</span><br /><span className="text-stone-200">{item.periodo_inicio || '—'} → {item.periodo_fim || '—'}</span></div>
-                        <div><span className="text-stone-500 text-xs">Data emissão:</span><br /><span className="text-stone-200">{item.data_emissao || '—'}</span></div>
-                        <div><span className="text-stone-500 text-xs">Médico:</span><br /><span className="text-stone-200">{item.medico || '—'}</span></div>
-                        <div><span className="text-stone-500 text-xs">CRM:</span><br /><span className="text-stone-200">{item.crm || '—'}</span></div>
-                        <div><span className="text-stone-500 text-xs">CID:</span><br /><span className="text-stone-200">{item.cid || '—'}</span></div>
+                  {preview.map((item, idx) => {
+                    const hasWarn = item._warnings && item._warnings.length > 0
+                    function upd(field, val) {
+                      setPreview(prev => prev.map((p, i) => i === idx ? { ...p, [field]: val } : p))
+                    }
+                    const inp = (field, type = 'text', placeholder = '') => (
+                      <input
+                        type={type}
+                        value={item[field] ?? ''}
+                        placeholder={placeholder || '—'}
+                        onChange={e => upd(field, type === 'number' ? (parseInt(e.target.value) || null) : (e.target.value || null))}
+                        className="w-full px-2 py-1.5 rounded bg-stone-900 border text-stone-100 text-xs focus:outline-none"
+                        style={{ borderColor: (item[field] === null || item[field] === undefined || item[field] === '') ? '#dc2626' : '#4b5563' }}
+                        onFocus={e => e.target.style.borderColor = '#9a7520'}
+                        onBlur={e => e.target.style.borderColor = (item[field] === null || item[field] === undefined || item[field] === '') ? '#dc2626' : '#4b5563'}
+                      />
+                    )
+                    return (
+                      <div key={idx} className="rounded-lg border p-4" style={{ backgroundColor: '#1e1a17', borderColor: hasWarn ? '#dc2626' : '#3c3330' }}>
+                        {/* Header */}
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-xs font-bold text-stone-400">Atestado {idx + 1}</span>
+                          {hasWarn && (
+                            <div className="flex flex-col gap-0.5">
+                              {item._warnings.map((w, wi) => (
+                                <span key={wi} className="text-xs text-red-400 flex items-center gap-1">
+                                  <span>⚠</span> {w}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {item._derived_periodo && (
+                            <span className="text-xs text-amber-400">período calculado automaticamente</span>
+                          )}
+                        </div>
+
+                        {/* Editable fields grid */}
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs mb-3">
+                          <div>
+                            <label className="text-stone-500 block mb-1">Nome do paciente</label>
+                            {inp('nome_paciente', 'text', 'Nome completo')}
+                          </div>
+                          <div>
+                            <label className="text-stone-500 block mb-1">Data de emissão</label>
+                            {inp('data_emissao', 'date')}
+                          </div>
+                          <div>
+                            <label className="text-stone-500 block mb-1">
+                              Dias afastados
+                              {(item.total_dias_afastados === null || item.total_dias_afastados === undefined) && (
+                                <span className="text-red-400 ml-1">*obrigatório</span>
+                              )}
+                            </label>
+                            {inp('total_dias_afastados', 'number', '0')}
+                          </div>
+                          <div>
+                            <label className="text-stone-500 block mb-1">CID</label>
+                            {inp('cid', 'text', 'ex: J11, M543')}
+                          </div>
+                          <div>
+                            <label className="text-stone-500 block mb-1">Período início</label>
+                            {inp('periodo_inicio', 'date')}
+                          </div>
+                          <div>
+                            <label className="text-stone-500 block mb-1">
+                              Período fim
+                              {item._derived_fim && <span className="text-amber-400 ml-1">(calculado)</span>}
+                            </label>
+                            {inp('periodo_fim', 'date')}
+                          </div>
+                          <div>
+                            <label className="text-stone-500 block mb-1">Médico</label>
+                            {inp('medico', 'text', 'Nome do médico')}
+                          </div>
+                          <div>
+                            <label className="text-stone-500 block mb-1">CRM</label>
+                            {inp('crm', 'text', 'Somente dígitos')}
+                          </div>
+                        </div>
+
+                        {/* Employee binding */}
+                        <div>
+                          <label className="text-xs text-stone-400 block mb-1">Vincular ao funcionário:</label>
+                          <select
+                            value={item.funcionario_id || ''}
+                            onChange={e => upd('funcionario_id', e.target.value)}
+                            className="w-full px-3 py-2 rounded bg-stone-800 border text-stone-100 text-sm focus:outline-none appearance-none"
+                            style={{ borderColor: '#9a7520' }}
+                          >
+                            <option value="">— Sistema identifica pelo nome automaticamente —</option>
+                            {employees.map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}
+                          </select>
+                        </div>
                       </div>
-                      <div>
-                        <label className="text-xs text-stone-400 block mb-1">Vincular ao funcionário:</label>
-                        <select
-                          value={item.funcionario_id || ''}
-                          onChange={e => setPreview(prev => prev.map((p, i) => i === idx ? { ...p, funcionario_id: e.target.value } : p))}
-                          className="w-full px-3 py-2 rounded bg-stone-800 border text-stone-100 text-sm focus:outline-none appearance-none"
-                          style={{ borderColor: '#9a7520' }}
-                        >
-                          <option value="">— Deixar para o sistema identificar pelo nome —</option>
-                          {employees.map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
 
                 {saveMsg && (
