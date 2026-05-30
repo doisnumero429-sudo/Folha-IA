@@ -3,10 +3,9 @@
 /**
  * Excel report generator using ExcelJS.
  *
- * Produces a workbook with three sheets:
- *   1. Folha      — main payroll data table
- *   2. Resumo     — aggregated summary
- *   3. Pendências — pending items list
+ * Produces a workbook with two sheets:
+ *   1. Folha   — main payroll data table
+ *   2. Resumo  — aggregated summary
  */
 
 const ExcelJS = require('exceljs');
@@ -31,7 +30,7 @@ async function gerarExcel(fechamento, lancamentos, pendencias) {
 
   const mesNome = MONTHS_PT[fechamento.mes - 1];
   const titulo = `${mesNome}/${fechamento.ano}`;
-  const geradoEm = new Date().toLocaleString('pt-BR');
+  const geradoEm = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   const statusLabel = fechamento.status === 'aprovado' ? 'APROVADO' : 'EM ANDAMENTO';
 
   // ==========================================================================
@@ -227,47 +226,6 @@ async function gerarExcel(fechamento, lancamentos, pendencias) {
   resumo.getCell('B7').numFmt = 'R$ #,##0.00';
 
   resumo.views = [{ state: 'frozen', ySplit: 5 }];
-
-  // ==========================================================================
-  // SHEET 3 — Pendências
-  // ==========================================================================
-  const sheet3 = workbook.addWorksheet('Pendências', {
-    properties: { tabColor: { argb: 'FFCC0000' } },
-  });
-
-  const rP1 = sheet3.addRow(['PENDÊNCIAS']);
-  rP1.getCell(1).font = { bold: true, size: 13, color: { argb: 'FFCC0000' } };
-  sheet3.addRow([`Mês: ${titulo}`]);
-  sheet3.addRow([]);
-
-  const pendHeader = sheet3.addRow(['Tipo', 'Descrição', 'Nome Original', 'Valor (R$)', 'Status']);
-  pendHeader.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  pendHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCC0000' } };
-
-  for (const p of (pendencias || [])) {
-    const row = sheet3.addRow([
-      p.tipo || '',
-      p.descricao || '',
-      p.nome_original || '',
-      p.valor != null ? Number(p.valor) : '',
-      p.status || '',
-    ]);
-    if (p.status === 'resolvida') {
-      row.getCell(5).font = { color: { argb: 'FF1C7A3A' } };
-    } else {
-      row.getCell(1).font = { color: { argb: 'FFCC0000' } };
-    }
-  }
-
-  sheet3.getColumn(1).width = 26;
-  sheet3.getColumn(2).width = 52;
-  sheet3.getColumn(3).width = 32;
-  sheet3.getColumn(4).width = 13;
-  sheet3.getColumn(5).width = 13;
-  sheet3.getColumn(4).numFmt = 'R$ #,##0.00';
-
-  sheet3.autoFilter = { from: 'A4', to: 'E4' };
-  sheet3.views = [{ state: 'frozen', ySplit: 4 }];
 
   // ==========================================================================
   // Return buffer

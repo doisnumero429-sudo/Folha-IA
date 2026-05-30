@@ -33,16 +33,18 @@ function formatBRL(value) {
  * @returns {Promise<Buffer>}
  */
 function gerarPDF(fechamento, lancamentos, pendencias) {
-  // Lazy-require so the module doesn't crash if pdfmake is unavailable during tests
-  const PdfPrinter = require('pdfmake/build/pdfmake');
-  const pdfFonts   = require('pdfmake/build/vfs_fonts');
+  // Lazy-require so the module doesn't crash if pdfmake is unavailable during tests.
+  // Server-side entrypoint is `pdfmake` (PdfPrinter); the vfs_fonts build exports
+  // the font map directly (no `.pdfMake.vfs` wrapper in pdfmake 0.2.x).
+  const PdfPrinter = require('pdfmake');
+  const vfs        = require('pdfmake/build/vfs_fonts');
 
   const fonts = {
     Roboto: {
-      normal:      Buffer.from(pdfFonts.pdfMake.vfs['Roboto-Regular.ttf'],       'base64'),
-      bold:        Buffer.from(pdfFonts.pdfMake.vfs['Roboto-Medium.ttf'],        'base64'),
-      italics:     Buffer.from(pdfFonts.pdfMake.vfs['Roboto-Italic.ttf'],        'base64'),
-      bolditalics: Buffer.from(pdfFonts.pdfMake.vfs['Roboto-MediumItalic.ttf'], 'base64'),
+      normal:      Buffer.from(vfs['Roboto-Regular.ttf'],      'base64'),
+      bold:        Buffer.from(vfs['Roboto-Medium.ttf'],       'base64'),
+      italics:     Buffer.from(vfs['Roboto-Italic.ttf'],       'base64'),
+      bolditalics: Buffer.from(vfs['Roboto-MediumItalic.ttf'], 'base64'),
     },
   };
 
@@ -50,7 +52,7 @@ function gerarPDF(fechamento, lancamentos, pendencias) {
 
   const mesNome    = MONTHS_PT[fechamento.mes - 1];
   const titulo     = `${mesNome}/${fechamento.ano}`;
-  const geradoEm   = new Date().toLocaleString('pt-BR');
+  const geradoEm   = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   const statusText = fechamento.status === 'aprovado'
     ? `APROVADO${fechamento.aprovado_por ? ' — por ' + fechamento.aprovado_por : ''}`
     : 'EM ANDAMENTO';
@@ -84,20 +86,20 @@ function gerarPDF(fechamento, lancamentos, pendencias) {
       { text: l.funcionario.funcao,                            fillColor: idx % 2 ? '#FFF8F0' : null },
       { text: formatBRL(l.consumo),   alignment: 'right',     fillColor: idx % 2 ? '#FFF8F0' : null },
       { text: formatBRL(l.vales),     alignment: 'right',     fillColor: idx % 2 ? '#FFF8F0' : null },
-      { text: String(l.faltas  || 0), alignment: 'center',    fillColor: l.faltas  > 0 ? '#FFFFEB9C' : (idx % 2 ? '#FFF8F0' : null) },
+      { text: String(l.faltas  || 0), alignment: 'center',    fillColor: l.faltas  > 0 ? '#FFEB9C' : (idx % 2 ? '#FFF8F0' : null) },
       { text: String(l.dsr     || 0), alignment: 'center',    fillColor: idx % 2 ? '#FFF8F0' : null },
       { text: String(l.dias_descontados || 0), alignment: 'center', fillColor: idx % 2 ? '#FFF8F0' : null },
       { text: String(l.dias_afastados   || 0), alignment: 'center', fillColor: l.dias_afastados > 0 ? '#BDD7EE' : (idx % 2 ? '#FFF8F0' : null) },
     ]),
     // Totals row
     [
-      { text: 'TOTAL', bold: true, colSpan: 2, fillColor: '#FFFFEB9C' }, {},
-      { text: formatBRL(totConsumo), bold: true, alignment: 'right',  fillColor: '#FFFFEB9C' },
-      { text: formatBRL(totVales),   bold: true, alignment: 'right',  fillColor: '#FFFFEB9C' },
-      { text: String(totFaltas), bold: true, alignment: 'center',    fillColor: '#FFFFEB9C' },
-      { text: String(totDSR),    bold: true, alignment: 'center',    fillColor: '#FFFFEB9C' },
-      { text: String(totDesc),   bold: true, alignment: 'center',    fillColor: '#FFFFEB9C' },
-      { text: String(totAfas),   bold: true, alignment: 'center',    fillColor: '#FFFFEB9C' },
+      { text: 'TOTAL', bold: true, colSpan: 2, fillColor: '#FFEB9C' }, {},
+      { text: formatBRL(totConsumo), bold: true, alignment: 'right',  fillColor: '#FFEB9C' },
+      { text: formatBRL(totVales),   bold: true, alignment: 'right',  fillColor: '#FFEB9C' },
+      { text: String(totFaltas), bold: true, alignment: 'center',    fillColor: '#FFEB9C' },
+      { text: String(totDSR),    bold: true, alignment: 'center',    fillColor: '#FFEB9C' },
+      { text: String(totDesc),   bold: true, alignment: 'center',    fillColor: '#FFEB9C' },
+      { text: String(totAfas),   bold: true, alignment: 'center',    fillColor: '#FFEB9C' },
     ],
   ];
 

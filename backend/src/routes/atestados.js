@@ -183,16 +183,25 @@ router.put('/:id', auth, async (req, res) => {
       dias_afastados,
       medico,
       crm,
+      nome_extraido,
     } = req.body;
 
     const updates = {};
-    if (funcionario_id  !== undefined) updates.funcionario_id  = funcionario_id;
-    if (data_emissao    !== undefined) updates.data_emissao    = data_emissao;
-    if (periodo_inicio  !== undefined) updates.periodo_inicio  = periodo_inicio;
-    if (periodo_fim     !== undefined) updates.periodo_fim     = periodo_fim;
-    if (dias_afastados  !== undefined) updates.dias_afastados  = dias_afastados;
+    // funcionario_id: empty string / null → unlink (null); otherwise store as integer
+    if (funcionario_id !== undefined) {
+      updates.funcionario_id =
+        funcionario_id === '' || funcionario_id === null
+          ? null
+          : parseInt(funcionario_id, 10);
+    }
+    // Empty date strings must become null to satisfy the DATE column
+    if (data_emissao    !== undefined) updates.data_emissao    = data_emissao   || null;
+    if (periodo_inicio  !== undefined) updates.periodo_inicio  = periodo_inicio || null;
+    if (periodo_fim     !== undefined) updates.periodo_fim     = periodo_fim    || null;
+    if (dias_afastados  !== undefined) updates.dias_afastados  = parseInt(dias_afastados, 10) || 0;
     if (medico          !== undefined) updates.medico          = medico;
     if (crm             !== undefined) updates.crm             = crm;
+    if (nome_extraido   !== undefined) updates.nome_extraido   = nome_extraido;
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'Nenhum campo para atualizar.' });
