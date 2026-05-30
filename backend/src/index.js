@@ -9,6 +9,8 @@ const uploadRoutes = require('./routes/upload');
 const fechamentoRoutes = require('./routes/fechamento');
 const funcionariosRoutes = require('./routes/funcionarios');
 const correlacoesRoutes = require('./routes/correlacoes');
+const proibidosRoutes = require('./routes/proibidos');
+const ambiguosRoutes = require('./routes/ambiguos');
 const gerarRoutes = require('./routes/gerar');
 const atestadosRoutes = require('./routes/atestados');
 const { loadData } = require('./services/matcher');
@@ -36,6 +38,8 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/fechamento', fechamentoRoutes);
 app.use('/api/funcionarios', funcionariosRoutes);
 app.use('/api/correlacoes', correlacoesRoutes);
+app.use('/api/proibidos', proibidosRoutes);
+app.use('/api/ambiguos', ambiguosRoutes);
 app.use('/api/gerar', gerarRoutes);
 app.use('/api/atestados', atestadosRoutes);
 

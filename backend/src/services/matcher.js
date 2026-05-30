@@ -38,6 +38,7 @@ function normalizeName(raw) {
 let _employees = [];       // [{ id, nome, funcao, ativo }]
 let _correlations = {};    // normalized_alias → funcionario_id
 let _blocked = new Set();  // normalized blocked names
+let _ambiguous = new Set(['ALEX', 'PRISCILA']); // normalized ambiguous triggers (fallback defaults)
 
 // ---------------------------------------------------------------------------
 // Data loading
@@ -68,6 +69,18 @@ async function loadData(supabaseAdmin) {
     .select('*');
   if (probErr) throw new Error(`loadData blocked: ${probErr.message}`);
   _blocked = new Set((probs || []).map(p => p.nome_normalizado));
+
+  // Ambiguous triggers (configurable via UI; fallback to defaults if table doesn't exist yet)
+  try {
+    const { data: ambs, error: ambErr } = await supabaseAdmin
+      .from('ambiguos')
+      .select('*');
+    if (!ambErr) {
+      _ambiguous = new Set((ambs || []).map(a => a.nome_normalizado));
+    }
+  } catch {
+    // keep fallback defaults
+  }
 }
 
 async function reloadData(supabaseAdmin) {
@@ -96,22 +109,12 @@ function matchName(rawName) {
     return { type: 'blocked', normalizedName: normalized, originalName: rawName };
   }
 
-  // ── 2. Hard-coded ambiguous single first names ────────────────────────────
-  if (normalized === 'ALEX') {
-    const options = _employees.filter(e => normalizeName(e.nome).startsWith('ALEX'));
+  // ── 2. Ambiguous single first names (configurable via Settings > Ambíguos) ─
+  if (_ambiguous.has(normalized)) {
+    const options = _employees.filter(e => normalizeName(e.nome).startsWith(normalized));
     return {
       type: 'ambiguous',
-      question: 'Qual Alex?',
-      options,
-      normalizedName: normalized,
-      originalName: rawName,
-    };
-  }
-  if (normalized === 'PRISCILA') {
-    const options = _employees.filter(e => normalizeName(e.nome).startsWith('PRISCILA'));
-    return {
-      type: 'ambiguous',
-      question: 'Qual Priscila?',
+      question: `Qual ${rawName}?`,
       options,
       normalizedName: normalized,
       originalName: rawName,
