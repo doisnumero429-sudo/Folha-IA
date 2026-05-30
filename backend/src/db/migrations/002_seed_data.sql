@@ -77,9 +77,3 @@ ON CONFLICT (nome_normalizado) DO NOTHING;
 SELECT setval(pg_get_serial_sequence('funcionarios', 'id'), (SELECT MAX(id) FROM funcionarios));
 SELECT setval(pg_get_serial_sequence('correlacoes', 'id'),  (SELECT MAX(id) FROM correlacoes));
 SELECT setval(pg_get_serial_sequence('proibidos', 'id'),    (SELECT MAX(id) FROM proibidos));
-
--- Resync SERIAL sequences after inserting rows with explicit IDs, otherwise the
--- next auto-generated id collides with a seeded row (duplicate key on _pkey).
-SELECT setval(pg_get_serial_sequence('funcionarios', 'id'), (SELECT MAX(id) FROM funcionarios));
-SELECT setval(pg_get_serial_sequence('correlacoes', 'id'),  (SELECT MAX(id) FROM correlacoes));
-SELECT setval(pg_get_serial_sequence('proibidos', 'id'),    (SELECT MAX(id) FROM proibidos));
