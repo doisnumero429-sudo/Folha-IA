@@ -7,6 +7,8 @@
  * Works offline, mobile-friendly, and print-ready.
  */
 
+const { getCidInfo, buildClientCidScript } = require('./cid');
+
 // Server-side CID-10 lookup (mirrors CID10_JS embedded in the browser)
 const CID10_SERVER = {
   'J00':'Rinite aguda (resfriado comum)','J11':'Influenza (gripe) sem vírus identificado',
@@ -93,6 +95,9 @@ function gerarHTML(fechamento, lancamentos, pendencias) {
   const statusText = isAprovado
     ? `APROVADO${fechamento.aprovado_por ? ' — ' + esc(fechamento.aprovado_por) : ''}`
     : 'EM ANDAMENTO';
+
+  // Rich CID lookup script embedded in the standalone file (offline-ready).
+  const cidClientScript = buildClientCidScript();
 
   const totConsumo = lancamentos.reduce((s, l) => s + (Number(l.consumo) || 0), 0);
   const totVales   = lancamentos.reduce((s, l) => s + (Number(l.vales)   || 0), 0);
@@ -344,8 +349,12 @@ const LANCAMENTOS = ${JSON.stringify(lancamentos.map(l => ({
       const isCluster = info.employees.size >= 2;
       const isRecurrent = info.historicalCount > 0;
       const empList = [...info.employees].join(', ');
-      // Build description from the server-side getCIDDesc function
-      const desc = getCIDDesc(cid);
+      // Rich description: technical name + simple name, or a clear
+      // "Não encontrada" when the code isn't catalogued (never blank).
+      const cidInfo = getCidInfo(cid);
+      const desc = cidInfo.encontrada
+        ? `${cidInfo.descricao} — ${cidInfo.simples}`
+        : 'Não encontrada';
       return `<tr${isCluster ? ' style="background:#fff7ed"' : ''}>
         <td style="font-weight:700;white-space:nowrap">
           ${esc(cid)}
@@ -500,8 +509,12 @@ tbody tr.data-row:nth-child(4n+3) td{background:#fffdf9}
 #cidModal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px}
 #cidModal.hidden{display:none}
 #cidModalBox{background:#fff;border-radius:12px;padding:20px 24px;max-width:360px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)}
-#cidModalCode{font-size:22px;font-weight:800;color:#1e3a5f;margin-bottom:6px}
-#cidModalDesc{font-size:15px;color:#1c1917;margin-bottom:16px}
+#cidModalCode{font-size:22px;font-weight:800;color:#1e3a5f;margin-bottom:10px}
+#cidModalBody{margin-bottom:16px}
+.cid-row{display:flex;gap:10px;padding:4px 0;font-size:14px}
+.cid-k{width:96px;min-width:96px;color:#6b7280;font-weight:600}
+.cid-v{color:#1c1917;flex:1}
+.cid-msg{margin-top:8px;font-size:13px;color:#b45309;font-style:italic}
 #cidModalClose{padding:6px 18px;border-radius:8px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-weight:600}
 #cidModalClose:hover{background:#2563eb}
 
@@ -610,7 +623,7 @@ ${cidSummaryHtml}
 <div id="cidModal" class="hidden">
   <div id="cidModalBox">
     <div id="cidModalCode"></div>
-    <div id="cidModalDesc"></div>
+    <div id="cidModalBody"></div>
     <button id="cidModalClose" onclick="closeCIDModal()">Fechar</button>
   </div>
 </div>
@@ -623,7 +636,7 @@ ${cidIntelligenceHtml}
 </div>
 
 <script>
-${CID10_JS}
+${cidClientScript}
 ${scriptData}
 
 // ── State ────────────────────────────────────────────────────────
@@ -743,10 +756,22 @@ function copiarResumo() {
 
 
 // ── CID Modal ────────────────────────────────────────────────────
+function cidEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function showCIDModal(code, event) {
   event && event.stopPropagation();
-  document.getElementById('cidModalCode').textContent = 'CID ' + code;
-  document.getElementById('cidModalDesc').textContent = getCIDDesc(code);
+  var info = getCidInfo(code);
+  document.getElementById('cidModalCode').textContent = 'CID ' + (info.cid || code);
+  var body = document.getElementById('cidModalBody');
+  if (info.encontrada) {
+    body.innerHTML =
+      '<div class="cid-row"><span class="cid-k">Nome técnico</span><span class="cid-v">' + cidEsc(info.descricao) + '</span></div>' +
+      '<div class="cid-row"><span class="cid-k">Nome simples</span><span class="cid-v">' + cidEsc(info.simples) + '</span></div>' +
+      '<div class="cid-row"><span class="cid-k">Pode indicar</span><span class="cid-v">' + cidEsc(info.explica) + '</span></div>';
+  } else {
+    body.innerHTML =
+      '<div class="cid-row"><span class="cid-k">Descrição</span><span class="cid-v">Não encontrada</span></div>' +
+      '<div class="cid-msg">Não foi possível localizar a descrição deste CID.</div>';
+  }
   document.getElementById('cidModal').classList.remove('hidden');
 }
 function closeCIDModal() {

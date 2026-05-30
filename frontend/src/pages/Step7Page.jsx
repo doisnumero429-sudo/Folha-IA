@@ -78,12 +78,20 @@ export default function Step7Page() {
     load()
   }, [id])
 
-  async function downloadFile(url, filename, setLoadingFn, key) {
+  // Mensagens simples e amigáveis — nunca mostramos erros técnicos ao usuário.
+  // (Quando a resposta é um blob, o corpo de erro nem vem como texto legível.)
+  const FRIENDLY_ERROR = {
+    pdf: 'Não foi possível gerar o PDF neste momento. Você pode baixar o relatório em Excel ou HTML.',
+    excel: 'Não conseguimos preparar o arquivo agora. Tente novamente em instantes.',
+    html: 'Não conseguimos preparar o arquivo agora. Tente novamente em instantes.',
+  }
+
+  async function downloadFile(url, filename, setLoadingFn, key, mimeType) {
     setLoadingFn(true)
     setDownloadErrors(prev => ({ ...prev, [key]: null }))
     try {
       const res = await api.get(url, { responseType: 'blob' })
-      const blob = new Blob([res.data])
+      const blob = mimeType ? new Blob([res.data], { type: mimeType }) : new Blob([res.data])
       const href = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = href
@@ -95,29 +103,23 @@ export default function Step7Page() {
     } catch (err) {
       setDownloadErrors(prev => ({
         ...prev,
-        [key]: err.response?.data?.error || 'Erro ao gerar arquivo'
+        [key]: FRIENDLY_ERROR[key] || FRIENDLY_ERROR.excel
       }))
     } finally {
       setLoadingFn(false)
     }
   }
 
-  async function handleHtmlDownload() {
-    setGeneratingHtml(true)
-    setDownloadErrors(prev => ({ ...prev, html: null }))
-    try {
-      const res = await api.get(`/gerar/html/${id}`, { responseType: 'blob' })
-      const blob = new Blob([res.data], { type: 'text/html' })
-      const href = URL.createObjectURL(blob)
-      window.open(href, '_blank')
-    } catch (err) {
-      setDownloadErrors(prev => ({
-        ...prev,
-        html: err.response?.data?.error || 'Erro ao gerar HTML'
-      }))
-    } finally {
-      setGeneratingHtml(false)
-    }
+  // O HTML é o relatório principal: baixamos como arquivo (.html) para que
+  // continue funcionando offline, no celular ou no computador, fora do sistema.
+  function handleHtmlDownload() {
+    return downloadFile(
+      `/gerar/html/${id}`,
+      `relatorio_${monthLabel?.toLowerCase()}_${fechamento?.ano}.html`,
+      setGeneratingHtml,
+      'html',
+      'text/html;charset=utf-8'
+    )
   }
 
   const monthLabel = fechamento ? MONTHS_PT[(fechamento.mes || 1) - 1] : ''
@@ -173,9 +175,9 @@ export default function Step7Page() {
         </div>
 
         {/* Document generation cards */}
-        <h2 className="font-semibold text-stone-200 mb-4">Gerar Documentos</h2>
+        <h2 className="font-semibold text-stone-200 mb-4">Baixar relatórios</h2>
         <p className="text-stone-400 text-sm mb-6">
-          Selecione o formato de saída desejado. A geração pode levar alguns segundos.
+          Escolha como quer baixar o relatório. Pode levar alguns segundos para ficar pronto.
         </p>
 
         <div className="grid gap-4 sm:grid-cols-3">
@@ -183,8 +185,8 @@ export default function Step7Page() {
           <div>
             <DownloadCard
               title="Excel"
-              description="Planilha completa com todos os lançamentos"
-              format=".xlsx"
+              description="Planilha para abrir no Excel"
+              format="Excel"
               loading={generatingExcel}
               onDownload={() =>
                 downloadFile(
@@ -209,8 +211,8 @@ export default function Step7Page() {
           <div>
             <DownloadCard
               title="PDF"
-              description="Documento formal para arquivo"
-              format=".pdf"
+              description="Documento para imprimir ou enviar"
+              format="PDF"
               loading={generatingPdf}
               onDownload={() =>
                 downloadFile(
@@ -234,9 +236,9 @@ export default function Step7Page() {
           {/* HTML */}
           <div>
             <DownloadCard
-              title="HTML"
-              description="Visualização no navegador"
-              format=".html"
+              title="Relatório Interativo HTML"
+              description="Relatório completo com busca, filtros e detalhes"
+              format="Relatório Interativo HTML"
               loading={generatingHtml}
               onDownload={handleHtmlDownload}
               icon={
@@ -245,6 +247,9 @@ export default function Step7Page() {
                 </svg>
               }
             />
+            <p className="text-stone-400 text-xs mt-2">
+              Pode ser aberto no celular ou computador mesmo fora do sistema.
+            </p>
             {downloadErrors.html && (
               <p className="text-red-400 text-xs mt-1.5 text-center">{downloadErrors.html}</p>
             )}

@@ -109,7 +109,7 @@ export default function EmployeeTable({ lancamentos, fechamentoId, onUpdate }) {
                   style={{ backgroundColor: rowBg }}
                 >
                   <td className="px-4 py-3">
-                    <span className="font-medium text-stone-100">{l.nome || l.funcionario_nome}</span>
+                    <span className="font-medium text-stone-100">{l.funcionario?.nome || l.funcionarios?.nome || l.nome || l.funcionario_nome || '—'}</span>
                     {hasFaltas && (
                       <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-amber-800/40 text-amber-300">F</span>
                     )}
@@ -117,7 +117,7 @@ export default function EmployeeTable({ lancamentos, fechamentoId, onUpdate }) {
                       <span className="ml-1 text-xs px-1.5 py-0.5 rounded bg-blue-800/40 text-blue-300">A</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-stone-400">{l.funcao || l.cargo || '—'}</td>
+                  <td className="px-4 py-3 text-stone-400">{l.funcionario?.funcao || l.funcionarios?.funcao || l.funcao || l.cargo || '—'}</td>
 
                   {/* Consumo */}
                   <td className="px-4 py-3 text-right">
