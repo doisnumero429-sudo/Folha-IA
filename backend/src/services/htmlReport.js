@@ -54,7 +54,7 @@ function miniBarChart(consumo, vales, maxVal) {
 function gerarHTML(fechamento, lancamentos, pendencias) {
   const mesNome    = MONTHS_PT[fechamento.mes - 1];
   const titulo     = `${mesNome}/${fechamento.ano}`;
-  const geradoEm   = new Date().toLocaleString('pt-BR');
+  const geradoEm   = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   const isAprovado = fechamento.status === 'aprovado';
   const statusText = isAprovado
     ? `APROVADO${fechamento.aprovado_por ? ' — ' + esc(fechamento.aprovado_por) : ''}`
