@@ -43,12 +43,23 @@ function gerarPDF(fechamento, lancamentos, pendencias) {
     || (pdfFonts && pdfFonts.vfs)
     || pdfFonts;
 
+  // Resolve a font file from the VFS by name, tolerating small naming
+  // differences across pdfmake versions. If a font truly can't be found we
+  // throw a clear, internal-only error (the route turns it into a friendly
+  // message) instead of letting Buffer.from(undefined) throw a cryptic one.
+  const pickFont = (...names) => {
+    for (const n of names) {
+      if (vfs && typeof vfs[n] === 'string') return Buffer.from(vfs[n], 'base64');
+    }
+    throw new Error('Fonte do PDF não encontrada: ' + names.join(' / '));
+  };
+
   const fonts = {
     Roboto: {
-      normal:      Buffer.from(vfs['Roboto-Regular.ttf'],       'base64'),
-      bold:        Buffer.from(vfs['Roboto-Medium.ttf'],        'base64'),
-      italics:     Buffer.from(vfs['Roboto-Italic.ttf'],        'base64'),
-      bolditalics: Buffer.from(vfs['Roboto-MediumItalic.ttf'], 'base64'),
+      normal:      pickFont('Roboto-Regular.ttf', 'Roboto-Regular.ttf'),
+      bold:        pickFont('Roboto-Medium.ttf', 'Roboto-Bold.ttf'),
+      italics:     pickFont('Roboto-Italic.ttf'),
+      bolditalics: pickFont('Roboto-MediumItalic.ttf', 'Roboto-BoldItalic.ttf'),
     },
   };
 
@@ -84,26 +95,31 @@ function gerarPDF(fechamento, lancamentos, pendencias) {
       { text: 'Dias Desc.',     style: 'tableHeader' },
       { text: 'Dias Afas.',     style: 'tableHeader' },
     ],
-    // Data rows
-    ...lancamentos.map((l, idx) => [
-      { text: l.funcionario.nome,                              fillColor: idx % 2 ? '#FFF8F0' : null },
-      { text: l.funcionario.funcao,                            fillColor: idx % 2 ? '#FFF8F0' : null },
+    // Data rows. Guard the employee object: if a lancamento ever arrives
+    // without `funcionario`, reading `.nome` would throw and break the whole
+    // PDF. We fall back to the Supabase relation name or an empty string.
+    ...lancamentos.map((l, idx) => {
+      const func = l.funcionario || l.funcionarios || {};
+      return [
+      { text: func.nome || '',                                fillColor: idx % 2 ? '#FFF8F0' : null },
+      { text: func.funcao || '',                              fillColor: idx % 2 ? '#FFF8F0' : null },
       { text: formatBRL(l.consumo),   alignment: 'right',     fillColor: idx % 2 ? '#FFF8F0' : null },
       { text: formatBRL(l.vales),     alignment: 'right',     fillColor: idx % 2 ? '#FFF8F0' : null },
-      { text: String(l.faltas  || 0), alignment: 'center',    fillColor: l.faltas  > 0 ? '#FFFFEB9C' : (idx % 2 ? '#FFF8F0' : null) },
+      { text: String(l.faltas  || 0), alignment: 'center',    fillColor: l.faltas  > 0 ? '#FFEB9C' : (idx % 2 ? '#FFF8F0' : null) },
       { text: String(l.dsr     || 0), alignment: 'center',    fillColor: idx % 2 ? '#FFF8F0' : null },
       { text: String(l.dias_descontados || 0), alignment: 'center', fillColor: idx % 2 ? '#FFF8F0' : null },
       { text: String(l.dias_afastados   || 0), alignment: 'center', fillColor: l.dias_afastados > 0 ? '#BDD7EE' : (idx % 2 ? '#FFF8F0' : null) },
-    ]),
+      ];
+    }),
     // Totals row
     [
-      { text: 'TOTAL', bold: true, colSpan: 2, fillColor: '#FFFFEB9C' }, {},
-      { text: formatBRL(totConsumo), bold: true, alignment: 'right',  fillColor: '#FFFFEB9C' },
-      { text: formatBRL(totVales),   bold: true, alignment: 'right',  fillColor: '#FFFFEB9C' },
-      { text: String(totFaltas), bold: true, alignment: 'center',    fillColor: '#FFFFEB9C' },
-      { text: String(totDSR),    bold: true, alignment: 'center',    fillColor: '#FFFFEB9C' },
-      { text: String(totDesc),   bold: true, alignment: 'center',    fillColor: '#FFFFEB9C' },
-      { text: String(totAfas),   bold: true, alignment: 'center',    fillColor: '#FFFFEB9C' },
+      { text: 'TOTAL', bold: true, colSpan: 2, fillColor: '#FFEB9C' }, {},
+      { text: formatBRL(totConsumo), bold: true, alignment: 'right',  fillColor: '#FFEB9C' },
+      { text: formatBRL(totVales),   bold: true, alignment: 'right',  fillColor: '#FFEB9C' },
+      { text: String(totFaltas), bold: true, alignment: 'center',    fillColor: '#FFEB9C' },
+      { text: String(totDSR),    bold: true, alignment: 'center',    fillColor: '#FFEB9C' },
+      { text: String(totDesc),   bold: true, alignment: 'center',    fillColor: '#FFEB9C' },
+      { text: String(totAfas),   bold: true, alignment: 'center',    fillColor: '#FFEB9C' },
     ],
   ];
 
