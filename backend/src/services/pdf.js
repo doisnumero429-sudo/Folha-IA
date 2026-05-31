@@ -33,8 +33,10 @@ function formatBRL(value) {
  * @returns {Promise<Buffer>}
  */
 function gerarPDF(fechamento, lancamentos, pendencias) {
-  // Lazy-require so the module doesn't crash if pdfmake is unavailable during tests
-  const PdfPrinter = require('pdfmake/src/printer');
+  // Lazy-require so the module doesn't crash if pdfmake is unavailable during tests.
+  // Server-side entrypoint is `pdfmake` (PdfPrinter); the vfs_fonts build exports
+  // the font map directly (no `.pdfMake.vfs` wrapper in pdfmake 0.2.x).
+  const PdfPrinter = require('pdfmake');
   const pdfFonts   = require('pdfmake/build/vfs_fonts');
 
   // The vfs export shape changed across pdfmake versions: older releases expose
@@ -56,7 +58,7 @@ function gerarPDF(fechamento, lancamentos, pendencias) {
 
   const fonts = {
     Roboto: {
-      normal:      pickFont('Roboto-Regular.ttf', 'Roboto-Regular.ttf'),
+      normal:      pickFont('Roboto-Regular.ttf'),
       bold:        pickFont('Roboto-Medium.ttf', 'Roboto-Bold.ttf'),
       italics:     pickFont('Roboto-Italic.ttf'),
       bolditalics: pickFont('Roboto-MediumItalic.ttf', 'Roboto-BoldItalic.ttf'),
