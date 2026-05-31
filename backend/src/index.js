@@ -11,6 +11,9 @@ const funcionariosRoutes = require('./routes/funcionarios');
 const correlacoesRoutes = require('./routes/correlacoes');
 const gerarRoutes = require('./routes/gerar');
 const atestadosRoutes = require('./routes/atestados');
+const acessoRoutes = require('./routes/acesso');
+const faltaRapidaRoutes = require('./routes/faltaRapida');
+const operadoresRoutes = require('./routes/operadores');
 const { loadData } = require('./services/matcher');
 const { supabaseAdmin } = require('./db/supabase');
 
@@ -38,6 +41,9 @@ app.use('/api/funcionarios', funcionariosRoutes);
 app.use('/api/correlacoes', correlacoesRoutes);
 app.use('/api/gerar', gerarRoutes);
 app.use('/api/atestados', atestadosRoutes);
+app.use('/api/acesso', acessoRoutes);
+app.use('/api/falta-rapida', faltaRapidaRoutes);
+app.use('/api/operadores', operadoresRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

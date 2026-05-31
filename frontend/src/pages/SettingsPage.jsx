@@ -19,6 +19,16 @@ export default function SettingsPage() {
   const [deletingEmp, setDeletingEmp] = useState(null)
   const [empError, setEmpError] = useState(null)
 
+  // Operadores state
+  const [operadores, setOperadores] = useState([])
+  const [opLoading, setOpLoading] = useState(false)
+  const [opError, setOpError] = useState(null)
+  const [newOpNome, setNewOpNome] = useState('')
+  const [newOpPin, setNewOpPin] = useState('')
+  const [addingOp, setAddingOp] = useState(false)
+  const [deletingOp, setDeletingOp] = useState(null)
+  const [togglingOp, setTogglingOp] = useState(null)
+
   // Correlações state
   const [correlacoes, setCorrelacoes] = useState([])
   const [corrLoading, setCorrLoading] = useState(true)
@@ -32,6 +42,68 @@ export default function SettingsPage() {
     loadEmployees()
     loadCorrelacoes()
   }, [])
+
+  useEffect(() => {
+    if (activeTab === 'operadores' && operadores.length === 0 && !opLoading) {
+      loadOperadores()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
+
+  async function loadOperadores() {
+    setOpLoading(true)
+    setOpError(null)
+    try {
+      const res = await api.get('/operadores')
+      setOperadores(res.data || [])
+    } catch (err) {
+      setOpError(err.response?.data?.error || 'Erro ao carregar operadores')
+    } finally {
+      setOpLoading(false)
+    }
+  }
+
+  async function handleAddOperador(e) {
+    e.preventDefault()
+    if (!newOpNome.trim() || !newOpPin.trim()) return
+    setAddingOp(true)
+    setOpError(null)
+    try {
+      await api.post('/operadores', { nome: newOpNome.trim(), pin: newOpPin.trim() })
+      setNewOpNome('')
+      setNewOpPin('')
+      await loadOperadores()
+    } catch (err) {
+      setOpError(err.response?.data?.error || 'Erro ao adicionar operador')
+    } finally {
+      setAddingOp(false)
+    }
+  }
+
+  async function handleToggleOperador(op) {
+    setTogglingOp(op.id)
+    try {
+      await api.put(`/operadores/${op.id}`, { ativo: !op.ativo })
+      setOperadores(prev => prev.map(o => o.id === op.id ? { ...o, ativo: !op.ativo } : o))
+    } catch (err) {
+      setOpError(err.response?.data?.error || 'Erro ao atualizar operador')
+    } finally {
+      setTogglingOp(null)
+    }
+  }
+
+  async function handleDeleteOperador(id) {
+    if (!window.confirm('Excluir este operador? Esta ação não pode ser desfeita.')) return
+    setDeletingOp(id)
+    try {
+      await api.delete(`/operadores/${id}`)
+      setOperadores(prev => prev.filter(o => o.id !== id))
+    } catch (err) {
+      setOpError(err.response?.data?.error || 'Erro ao excluir operador')
+    } finally {
+      setDeletingOp(null)
+    }
+  }
 
   async function loadEmployees() {
     setEmpLoading(true)
@@ -138,6 +210,7 @@ export default function SettingsPage() {
           {[
             { id: 'funcionarios', label: 'Funcionários' },
             { id: 'correlacoes', label: 'Correlações' },
+            { id: 'operadores', label: 'Operadores PIN' },
           ].map(tab => (
             <button
               key={tab.id}
@@ -396,6 +469,143 @@ export default function SettingsPage() {
             )}
           </div>
         )}
+        {/* ===== OPERADORES PIN ===== */}
+        {activeTab === 'operadores' && (
+          <div
+            className="rounded-xl border"
+            style={{ backgroundColor: '#241f1c', borderColor: '#3c3330' }}
+          >
+            <div className="px-6 py-4 border-b flex items-center justify-between" style={{ borderColor: '#3c3330' }}>
+              <div>
+                <h2 className="font-semibold text-stone-100">Operadores PIN</h2>
+                <p className="text-stone-500 text-xs mt-0.5">Acesso à página de lançamento rápido de faltas</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span
+                  className="text-xs px-2.5 py-1 rounded-full font-medium"
+                  style={{ backgroundColor: 'rgba(154,117,32,0.15)', color: '#c9a96e' }}
+                >
+                  {operadores.filter(o => o.ativo).length} ativo{operadores.filter(o => o.ativo).length !== 1 ? 's' : ''}
+                </span>
+                <a
+                  href="/faltas"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                  style={{ backgroundColor: 'rgba(154,117,32,0.2)', color: '#c9a96e', border: '1px solid #9a7520' }}
+                >
+                  Abrir página ↗
+                </a>
+              </div>
+            </div>
+
+            {opLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: '#9a7520', borderTopColor: 'transparent' }} />
+              </div>
+            ) : (
+              <>
+                {opError && (
+                  <div className="mx-6 mt-4 px-4 py-2 rounded bg-red-800/30 border border-red-600 text-red-300 text-sm">{opError}</div>
+                )}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ backgroundColor: '#2c2420' }}>
+                        <th className="text-left px-6 py-3 font-semibold" style={{ color: '#c9a96e' }}>Nome</th>
+                        <th className="text-center px-6 py-3 font-semibold" style={{ color: '#c9a96e' }}>Status</th>
+                        <th className="text-center px-6 py-3 font-semibold" style={{ color: '#c9a96e' }}>Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {operadores.length === 0 ? (
+                        <tr><td colSpan={3} className="px-6 py-10 text-center text-stone-500">Nenhum operador cadastrado</td></tr>
+                      ) : operadores.map((op, idx) => (
+                        <tr
+                          key={op.id}
+                          className="border-t"
+                          style={{ borderColor: '#2c2420', backgroundColor: idx % 2 === 0 ? '#1e1a17' : '#1c1917' }}
+                        >
+                          <td className="px-6 py-3 text-stone-200 font-medium">{op.nome}</td>
+                          <td className="px-6 py-3 text-center">
+                            <button
+                              onClick={() => handleToggleOperador(op)}
+                              disabled={togglingOp === op.id}
+                              className="px-3 py-1 rounded-full text-xs font-semibold transition-colors disabled:opacity-50"
+                              style={op.ativo
+                                ? { backgroundColor: 'rgba(34,197,94,0.15)', color: '#22c55e' }
+                                : { backgroundColor: 'rgba(120,113,108,0.15)', color: '#78716c' }}
+                            >
+                              {togglingOp === op.id ? '...' : op.ativo ? 'Ativo' : 'Inativo'}
+                            </button>
+                          </td>
+                          <td className="px-6 py-3 text-center">
+                            <button
+                              onClick={() => handleDeleteOperador(op.id)}
+                              disabled={deletingOp === op.id}
+                              className="px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50"
+                              style={{ color: '#ef4444' }}
+                              onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.1)'}
+                              onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                            >
+                              {deletingOp === op.id ? '...' : 'Excluir'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Add new operator */}
+                <div className="px-6 py-5 border-t" style={{ borderColor: '#3c3330' }}>
+                  <h3 className="font-medium text-stone-300 mb-1 text-sm">Adicionar Operador</h3>
+                  <p className="text-stone-500 text-xs mb-3">O PIN deve ter entre 4 e 8 dígitos. Nunca é armazenado em texto claro.</p>
+                  <form onSubmit={handleAddOperador} className="flex flex-col sm:flex-row gap-3">
+                    <div className="flex-1">
+                      <input
+                        type="text"
+                        value={newOpNome}
+                        onChange={e => setNewOpNome(e.target.value)}
+                        placeholder="Nome do operador"
+                        required
+                        className="w-full px-4 py-2.5 rounded-lg bg-stone-800 border text-stone-100 placeholder-stone-600 text-sm focus:outline-none"
+                        style={{ borderColor: '#3c3330' }}
+                        onFocus={e => e.target.style.borderColor = '#9a7520'}
+                        onBlur={e => e.target.style.borderColor = '#3c3330'}
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        value={newOpPin}
+                        onChange={e => setNewOpPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                        placeholder="PIN (4–8 dígitos)"
+                        required
+                        minLength={4}
+                        maxLength={8}
+                        className="w-full px-4 py-2.5 rounded-lg bg-stone-800 border text-stone-100 placeholder-stone-600 text-sm focus:outline-none"
+                        style={{ borderColor: '#3c3330' }}
+                        onFocus={e => e.target.style.borderColor = '#9a7520'}
+                        onBlur={e => e.target.style.borderColor = '#3c3330'}
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={addingOp || !newOpNome.trim() || newOpPin.length < 4}
+                      className="px-5 py-2.5 rounded-lg font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                      style={{ backgroundColor: '#9a7520' }}
+                    >
+                      {addingOp ? 'Adicionando...' : '+ Adicionar'}
+                    </button>
+                  </form>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
       </div>
     </Layout>
   )

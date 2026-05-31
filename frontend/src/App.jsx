@@ -13,6 +13,7 @@ import Step5Page from './pages/Step5Page'
 import Step6Page from './pages/Step6Page'
 import Step7Page from './pages/Step7Page'
 import SettingsPage from './pages/SettingsPage'
+import FaltaRapidaPage from './pages/FaltaRapidaPage'
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth()
@@ -140,6 +141,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route path="/faltas" element={<FaltaRapidaPage />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   )
