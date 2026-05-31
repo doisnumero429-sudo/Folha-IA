@@ -66,7 +66,10 @@ export default function StepIndicator({ currentStep, fechamentoId }) {
             </div>
           )
 
-          if (isCompleted && fechamentoId) {
+          // Free navigation: every step is clickable as long as we already have
+          // a fechamento. The visual style (done = green, current = gold,
+          // others = grey) stays the same — only the lock is removed.
+          if (fechamentoId) {
             return (
               <Link to={stepPath} key={step.num}>
                 {content}
